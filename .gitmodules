@@ -1,0 +1,3 @@
+[submodule "3rdParty/GPRT"]
+	path = 3rdParty/GPRT
+	url = git@github.com:gprt-org/GPRT.git
