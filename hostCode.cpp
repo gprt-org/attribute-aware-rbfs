@@ -40,14 +40,8 @@
 
 extern GPRTProgram deviceCode;
 
-// The extents of our bounding box
-float3 aabbPositions[2] = {{-1.0f, -1.0f, -1.0f}, {1.0f, 1.0f, 1.0f}};
-
 // initial image resolution
 const int2 fbSize = {1400, 460};
-
-// final image output
-const char *outFileName = "s03-singleAABB.png";
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -55,86 +49,71 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
+uint32_t numParticles = 10;
+float rbfRadius = .1f;
+
 #include <iostream>
 int
 main(int ac, char **av) {
-  // In this example, we will create an axis aligned bounding box (AABB). These
-  // are more general than triangle primitives, and can be used for custom
-  // primitive types.
-  LOG("gprt example '" << av[0] << "' starting up");
-
-  // create a context on the first device:
-  gprtRequestWindow(fbSize.x, fbSize.y, "S03 Single AABB");
+  gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
   GPRTContext context = gprtContextCreate();
   GPRTModule module = gprtModuleCreate(context, deviceCode);
 
-  // ##################################################################
-  // set up all the GPU kernels we want to run
-  // ##################################################################
+  auto GenParticles = gprtComputeCreate<ParticleData>(context, module, "GenParticles");
+  auto GenRBFBounds = gprtComputeCreate<ParticleData>(context, module, "GenRBFBounds");
 
-  // -------------------------------------------------------
-  // declare geometry type
-  // -------------------------------------------------------
-  GPRTGeomTypeOf<AABBGeomData> aabbGeomType =
-      gprtGeomTypeCreate<AABBGeomData>(context, GPRT_AABBS /* <- This is new! */);
-  gprtGeomTypeSetClosestHitProg(aabbGeomType, 0, module, "AABBClosestHit");
-  gprtGeomTypeSetIntersectionProg(aabbGeomType, 0, module, "AABBIntersection");
+  auto particleSplatType = gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
+  gprtGeomTypeSetIntersectionProg(particleSplatType, 0, module, "ParticleSplatIntersection");
+  gprtGeomTypeSetAnyHitProg(particleSplatType, 0, module, "ParticleSplatAnyHit");
 
-  // -------------------------------------------------------
-  // set up miss
-  // -------------------------------------------------------
   GPRTMissOf<MissProgData> miss = gprtMissCreate<MissProgData>(context, module, "miss");
-
-  // -------------------------------------------------------
-  // set up ray gen program
-  // -------------------------------------------------------
-  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "simpleRayGen");
-  // ##################################################################
-  // set the parameters for those kernels
-  // ##################################################################
-
-  // Setup pixel frame buffer
+  GPRTRayGenOf<RayGenData> rayGen = gprtRayGenCreate<RayGenData>(context, module, "baselineRaygen");
   GPRTBufferOf<uint32_t> frameBuffer = gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-
-  // Raygen program frame buffer
   RayGenData *rayGenData = gprtRayGenGetPointer(rayGen);
   rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
 
-  // Miss program checkerboard background colors
   MissProgData *missData = gprtMissGetPointer(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
-  LOG("building geometries ...");
+  auto particleBuffer = gprtDeviceBufferCreate<float4>(context, numParticles, nullptr);
+  auto aabbBuffer = gprtDeviceBufferCreate<float3>(context, 2 * numParticles, nullptr);
+  auto particleGeom = gprtGeomCreate<ParticleData>(context, particleSplatType);
+  gprtAABBsSetPositions(particleGeom, aabbBuffer, numParticles /* just one aabb */);
+  
+  ParticleData* particleRecord = gprtGeomGetPointer(particleGeom);
+  particleRecord->numParticles = numParticles;
+  particleRecord->rbfRadius = rbfRadius;
+  particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
+  particleRecord->particles = gprtBufferGetHandle(particleBuffer);
 
-  // Create our AABB geometry. Every AABB is defined using two float3's. The
-  // first float3 defines the bottom lower left near corner, and the second
-  // float3 defines the upper far right corner.
-  GPRTBufferOf<float3> aabbPositionsBuffer = gprtDeviceBufferCreate<float3>(context, 2, aabbPositions);
-  GPRTGeomOf<AABBGeomData> aabbGeom = gprtGeomCreate<AABBGeomData>(context, aabbGeomType);
-  gprtAABBsSetPositions(aabbGeom, aabbPositionsBuffer, 1 /* just one aabb */);
+  // same parameters go to these compute programs too
+  ParticleData* genParticlesData = gprtComputeGetPointer(GenParticles);
+  ParticleData* genRBFBoundsData = gprtComputeGetPointer(GenRBFBounds);
+  *genParticlesData = *particleRecord;
+  *genRBFBoundsData = *particleRecord;
 
-  // Note, we must create an "AABB" accel rather than a triangles accel.
-  GPRTAccel aabbAccel = gprtAABBAccelCreate(context, 1, &aabbGeom);
-  gprtAccelBuild(context, aabbAccel);
-
-  // triangle and AABB accels can be combined in a top level tree
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &aabbAccel);
-  gprtAccelBuild(context, world);
-
-  rayGenData->world = gprtAccelGetHandle(world);
-
-  // ##################################################################
-  // build the pipeline and shader binding table
-  // ##################################################################
+  // Upload parameters
   gprtBuildPipeline(context);
   gprtBuildShaderBindingTable(context);
 
-  // ##################################################################
-  // now that everything is ready: launch it ....
-  // ##################################################################
+  // Generate some particles
+  gprtComputeLaunch1D(context, GenParticles, numParticles);
 
-  LOG("launching ...");
+  // Generate bounding boxes for those particles
+  gprtComputeLaunch1D(context, GenRBFBounds, numParticles);
+
+  // Now we can build the tree
+  GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
+  gprtAccelBuild(context, particleAccel);
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
+  gprtAccelBuild(context, world);
+
+  // Assign tree to raygen parameters 
+  rayGenData->world = gprtAccelGetHandle(world);
+
+  gprtBuildPipeline(context);
+  gprtBuildShaderBindingTable(context);
 
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
@@ -195,34 +174,22 @@ main(int ac, char **av) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
     }
 
-    // Calls the GPU raygen kernel function
     gprtRayGenLaunch2D(context, rayGen, fbSize.x, fbSize.y);
-
-    // If a window exists, presents the frame buffer here to that window
     gprtBufferPresent(context, frameBuffer);
   }
-  // returns true if "X" pressed or if in "headless" mode
   while (!gprtWindowShouldClose(context));
-
-  // Save final frame to an image
-  LOG("done with launch, writing frame buffer to " << outFileName);
-  gprtBufferSaveImage(frameBuffer, fbSize.x, fbSize.y, outFileName);
-  LOG_OK("written rendered frame buffer to file " << outFileName);
-
-  // ##################################################################
-  // and finally, clean up
-  // ##################################################################
 
   LOG("cleaning up ...");
 
-  gprtBufferDestroy(aabbPositionsBuffer);
+  gprtBufferDestroy(particleBuffer);
+  gprtBufferDestroy(aabbBuffer);
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(rayGen);
   gprtMissDestroy(miss);
-  gprtAccelDestroy(aabbAccel);
+  gprtAccelDestroy(particleAccel);
   gprtAccelDestroy(world);
-  gprtGeomDestroy(aabbGeom);
-  gprtGeomTypeDestroy(aabbGeomType);
+  gprtGeomDestroy(particleGeom);
+  gprtGeomTypeDestroy(particleSplatType);
   gprtModuleDestroy(module);
   gprtContextDestroy(context);
 

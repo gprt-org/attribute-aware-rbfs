@@ -28,7 +28,7 @@ struct Payload {
 
 // This ray generation program will kick off the ray tracing process,
 // generating rays and tracing them into the world.
-GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
+GPRT_RAYGEN_PROGRAM(baselineRaygen, (RayGenData, record)) {
   Payload payload;
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -41,8 +41,8 @@ GPRT_RAYGEN_PROGRAM(simpleRayGen, (RayGenData, record)) {
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  TraceRay(world,                   // the tree
-           RAY_FLAG_FORCE_OPAQUE,   // ray flags
+  TraceRay(world,         // the tree
+           RAY_FLAG_NONE,   // ray flags
            0xff,                    // instance inclusion mask
            0,                       // ray type
            1,                       // number of ray types
@@ -59,36 +59,36 @@ struct Attribute {
   float3 color;
 };
 
-// This intersection program will be called when rays hit our axis
-// aligned bounding boxes. Here, we can fetch per-geometry data and
-// process that data, but we do not have access to the ray payload
-// structure here.
-//
-// Instead, we pass data through a customizable Attributes structure
-// for further processing by closest hit / any hit programs.
-GPRT_INTERSECTION_PROGRAM(AABBIntersection, (AABBGeomData, record)) {
+GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
   Attribute attr;
   attr.color = float3(1.f, 1.f, 1.f);
   ReportHit(0.1f, /*hitKind*/ 0, attr);
 }
 
-// This closest hit program will be called when our intersection program
-// reports a hit between our ray and our custom primitives.
-// Here, we can fetch per-geometry data, process that data, and send
-// it back to our ray generation program.
-//
-// Note, since this is a custom AABB primitive, our intersection program
-// above defines what attributes are passed to our closest hit program.
-//
-// Also note, this program is also called after all ReportHit's have been
-// called and we can conclude which reported hit is closest.
-GPRT_CLOSEST_HIT_PROGRAM(AABBClosestHit, (AABBGeomData, record), (Payload, payload), (Attribute, attribute)) {
-  payload.color = attribute.color;
+GPRT_ANY_HIT_PROGRAM(ParticleSplatAnyHit, (ParticleData, record), (Payload, payload), (Attribute, attribute)) {
+  printf("TEST\n");
+  payload.color = float3(1.f, 1.f, 0.f); //attribute.color;
+  AcceptHitAndEndSearch();
 }
 
-// This miss program will be called when rays miss all primitives.
-// We often define some "default" ray payload behavior here,
-// for example, returning a background color.
+
+GPRT_COMPUTE_PROGRAM(GenParticles, (ParticleData, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  float t = float(primID) / float(record.numParticles);
+  float4 particle = float4(sin(t * 2.f * 3.14f), cos(t * 2.f * 3.14f), 0.f, 1.f);
+  gprt::store<float4>(record.particles, primID, particle);
+}
+
+GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  float4 particle = gprt::load<float4>(record.particles, primID);
+  float radius = record.rbfRadius; // prior work just set this to some global constant.
+  float3 aabbMin = particle.xyz - float3(radius, radius, radius);
+  float3 aabbMax = particle.xyz + float3(radius, radius, radius);
+  gprt::store(record.aabbs, 2 * primID, aabbMin);
+  gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
+}
+
 GPRT_MISS_PROGRAM(miss, (MissProgData, record), (Payload, payload)) {
   uint2 pixelID = DispatchRaysIndex().xy;
   int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);

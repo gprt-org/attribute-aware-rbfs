@@ -24,9 +24,12 @@
 
 /* variables available to all programs */
 
-/* variables for the triangle mesh geometry */
-struct AABBGeomData {
-  alignas(8) int tmp;   // unused for now
+
+struct ParticleData {
+  alignas(4) uint32_t numParticles;
+  alignas(4) float rbfRadius;
+  alignas(16) gprt::Buffer particles;
+  alignas(16) gprt::Buffer aabbs;
 };
 
 struct RayGenData {
