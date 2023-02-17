@@ -1,3 +1,6 @@
 [submodule "3rdParty/GPRT"]
 	path = 3rdParty/GPRT
 	url = git@github.com:gprt-org/GPRT.git
+[submodule "3rdParty/imgui_gradient"]
+	path = 3rdParty/imgui_gradient
+	url = git@github.com:natevm/imgui_gradient.git

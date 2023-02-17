@@ -4,6 +4,9 @@ project(point-clouds CXX)
 
 add_subdirectory(3rdParty/gprt)
 
+add_subdirectory(3rdParty/imgui_gradient)
+target_include_directories(imgui_gradient PRIVATE 3rdParty/gprt/3rdParty/)
+
 embed_devicecode(
   OUTPUT_TARGET
     deviceCode
@@ -12,4 +15,4 @@ embed_devicecode(
 )
 
 add_executable(viewer hostCode.cpp)
-target_link_libraries(viewer PUBLIC deviceCode gprt::gprt)
+target_link_libraries(viewer PUBLIC deviceCode gprt::gprt imgui_gradient::imgui_gradient)

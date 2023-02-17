@@ -30,12 +30,21 @@ struct ParticleData {
   alignas(4) float rbfRadius;
   alignas(16) gprt::Buffer particles;
   alignas(16) gprt::Buffer aabbs;
+  alignas(16) gprt::Buffer globalAABB;
 };
 
 struct RayGenData {
+  alignas(16) gprt::Texture guiTexture;
   alignas(16) gprt::Buffer frameBuffer;
 
   alignas(16) gprt::Accel world;
+  alignas(16) gprt::Buffer globalAABB;
+  alignas(4) float rbfRadius;
+  alignas(16) gprt::Buffer particles;
+
+  // colormap for visualization
+  alignas(16) gprt::Texture colormap;
+  alignas(16) gprt::Sampler colormapSampler;
 
   struct {
     alignas(16) float3 pos;
