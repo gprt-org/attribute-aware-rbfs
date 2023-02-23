@@ -22,10 +22,7 @@
 
 #include "sharedCode.h"
 
-// struct Payload {
-//     uint32_t test;
-//     float3 color;// : read(caller) : write(caller, anyhit);
-// };
+#include "rng.h"
 
 // https://www.sci.utah.edu/~wald/Publications/2019/rtgems/ParticleSplatting.pdf
 
@@ -72,20 +69,7 @@ float4 over(float4 a, float4 b) {
   return result;
 }
 
-// This ray generation program will kick off the ray tracing process,
-// generating rays and tracing them into the world.
 GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
-
-  uint dim;
-  // RWByteAddressBuffer buf = buffers[0]; //gprt::getBufferHandle(record.globalAABB);
-  // buf.GetDimensions(dim);
-  // buffers[record.globalAABB.y].GetDimensions(dim);
-  // if (all(DispatchRaysIndex().xy == int2(0,0))) {
-  //   printf("buffer dim is %d\n", dim);
-  // }
-
-  // // payload.color = float3(0.f, 0.f, 0.f);
-
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
@@ -149,38 +133,14 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         TraceRay(world,         // the tree
                 RAY_FLAG_NONE,   // ray flags
                 0xff,                    // instance inclusion mask
-                0,                       // ray type
-                1,                       // number of ray types
+                1,                       // ray type
+                gprt::getNumRayTypes(),  // number of ray types
                 0,                       // miss type
                 rayDesc,                 // the ray to trace
                 payload                  // the payload IO
         );
 
         float val = float(payload.tail) / float(PARTICLE_BUFFER_SIZE - 1);
-
-        // if (payload.tail == 1) {
-        //   result_color = float4(1.f, 1.f, 1.f, 1.f);
-        // }
-
-        // if (payload.tail == 2) {
-        //   result_color = float4(1.f, 0.f, 0.f, 1.f);
-        // }
-
-        // if (payload.tail == 3) {
-        //   result_color = float4(0.f, 1.f, 0.f, 1.f);
-        // }
-
-        // if (payload.tail == 4) {
-        //   result_color = float4(0.f, 0.f, 1.f, 1.f);
-        // }
-
-        // if (payload.tail >= 5) {
-        //   result_color = float4(1.f, 0.f, 1.f, 1.f);
-        // }
-
-        // if (payload.tail > 0) {
-        
-        // }
 
         // if (all(pixelID == centerID)) printf("%d\n", payload.tail);
         payload.sort();
@@ -250,59 +210,4 @@ GPRT_ANY_HIT_PROGRAM(ParticleSplatAnyHit, (ParticleData, record), (SplatPayload,
     payload.particles[payload.tail++] = hit_particle;
     gprt::ignoreHit();
   }
-}
-
-GPRT_COMPUTE_PROGRAM(GenParticles, (ParticleData, record), (1, 1, 1)) {
-  int primID = DispatchThreadID.x;
-  float t = float(primID) / float(record.numParticles);
-  float4 particle = float4(t * sin(t * 256.f * 3.14f),  t * cos(t * 256.f * 3.14f), 0.f, 1.f);
-  gprt::store<float4>(record.particles, primID, particle);
-}
-
-// inline float atomicMin(in RWByteAddressBuffer buffer, int addr, float val)
-// {
-//   float tmp = buffer.Load<float>(addr);
-//   uint ret = asuint(tmp);
-//   while(val < asfloat(ret)) {
-//     uint old = ret;
-//     buffer.InterlockedCompareExchange(addr, old, asuint(val), ret);
-//     if (ret == old) break;
-//   }
-//   return asfloat(ret);
-// }
-
-// inline float atomicMax(in RWByteAddressBuffer buffer, int addr, float val)
-// {
-//   float tmp = buffer.Load<float>(addr);
-//   uint ret = asuint(tmp);
-//   while(val > asfloat(ret)) {
-//     uint old = ret;
-//     buffer.InterlockedCompareExchange(addr, old, asuint(val), ret);
-//     if (ret == old) break;
-//   }
-//   return asfloat(ret);
-// }
-
-GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
-  int primID = DispatchThreadID.x;
-  float4 particle = gprt::load<float4>(record.particles, primID);
-  float radius = record.rbfRadius; // prior work just set this to some global constant.
-  float3 aabbMin = particle.xyz - float3(radius, radius, radius);
-  float3 aabbMax = particle.xyz + float3(radius, radius, radius);
-  gprt::store(record.aabbs, 2 * primID, aabbMin);
-  gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
-
-  gprt::atomicMin32f(record.globalAABB, 0, aabbMin.x);
-  gprt::atomicMin32f(record.globalAABB, 1, aabbMin.y);
-  gprt::atomicMin32f(record.globalAABB, 2, aabbMin.z);
-
-  gprt::atomicMax32f(record.globalAABB, 3, aabbMax.x);
-  gprt::atomicMax32f(record.globalAABB, 4, aabbMax.y);
-  gprt::atomicMax32f(record.globalAABB, 5, aabbMax.z);
-}
-
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (ParticleSample, payload)) {
-  // uint2 pixelID = DispatchRaysIndex().xy;
-  // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  // payload.color = (pattern & 1) ? record.color1 : record.color0;
 }

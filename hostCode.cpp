@@ -41,7 +41,10 @@
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
-extern GPRTProgram deviceCode;
+extern GPRTProgram deviceCodeCommon;
+extern GPRTProgram deviceCodeSplat;
+extern GPRTProgram deviceCodeRBF;
+extern GPRTProgram deviceCodeRaster;
 
 // initial image resolution
 const int2 fbSize = {1000, 1000};
@@ -53,32 +56,55 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 uint32_t numParticles = 10000;
-float rbfRadius = .05f;
+float rbfRadius = .01f;
 
 #include <iostream>
 int main(int ac, char **av) {
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
+  gprtRequestRayTypeCount(2);
+
   GPRTContext context = gprtContextCreate();
-  GPRTModule module = gprtModuleCreate(context, deviceCode);
+  GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);
+  GPRTModule moduleSplat = gprtModuleCreate(context, deviceCodeSplat);
+  GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
+  GPRTModule moduleRaster = gprtModuleCreate(context, deviceCodeRaster);
 
   auto GenParticles =
-      gprtComputeCreate<ParticleData>(context, module, "GenParticles");
+      gprtComputeCreate<ParticleData>(context, moduleCommon, "GenParticles");
   auto GenRBFBounds =
-      gprtComputeCreate<ParticleData>(context, module, "GenRBFBounds");
+      gprtComputeCreate<ParticleData>(context, moduleCommon, "GenRBFBounds");
+  auto AccumulateRBFBounds = gprtComputeCreate<RayGenData>(
+      context, moduleCommon, "AccumulateRBFBounds");
+  auto AverageRBFBounds =
+      gprtComputeCreate<RayGenData>(context, moduleCommon, "AverageRBFBounds");
 
-  auto particleSplatType =
-      gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
-  gprtGeomTypeSetIntersectionProg(particleSplatType, 0, module,
+  auto particleType = gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
+  gprtGeomTypeSetIntersectionProg(particleType, 1, moduleSplat,
                                   "ParticleSplatIntersection");
-  gprtGeomTypeSetAnyHitProg(particleSplatType, 0, module,
+  gprtGeomTypeSetAnyHitProg(particleType, 1, moduleSplat,
                             "ParticleSplatAnyHit");
+
+  gprtGeomTypeSetIntersectionProg(particleType, 0, moduleRBF,
+                                  "ParticleRBFIntersection");
+  gprtGeomTypeSetAnyHitProg(particleType, 0, moduleRBF, "ParticleRBFAnyHit");
+
   GPRTMissOf<MissProgData> miss =
-      gprtMissCreate<MissProgData>(context, module, "miss");
+      gprtMissCreate<MissProgData>(context, moduleCommon, "miss");
   GPRTRayGenOf<RayGenData> ParticleSplatRayGen =
-      gprtRayGenCreate<RayGenData>(context, module, "ParticleSplatRayGen");
+      gprtRayGenCreate<RayGenData>(context, moduleSplat, "ParticleSplatRayGen");
+
+  GPRTRayGenOf<RayGenData> ParticleRBFRayGen =
+      gprtRayGenCreate<RayGenData>(context, moduleRBF, "ParticleRBFRayGen");
+
+  GPRTRayGenOf<RayGenData> ParticleRasterRayGen = gprtRayGenCreate<RayGenData>(
+      context, moduleRaster, "ParticleRasterRayGen");
+
+  RayGenData raygenData = {};
 
   auto frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  auto accumBuffer =
+      gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x,
       fbSize.y, 1, false, nullptr);
@@ -96,11 +122,15 @@ int main(int ac, char **av) {
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
                         GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP);
 
-  RayGenData *rayGenData = gprtRayGenGetParameters(ParticleSplatRayGen);
-  rayGenData->frameBuffer = gprtBufferGetHandle(frameBuffer);
-  rayGenData->colormap = gprtTextureGetHandle(colormap);
-  rayGenData->colormapSampler = gprtSamplerGetHandle(sampler);
-  rayGenData->guiTexture = gprtTextureGetHandle(guiColorAttachment);
+  RayGenData *splatRayGenData = gprtRayGenGetParameters(ParticleSplatRayGen);
+  RayGenData *rbfRayGenData = gprtRayGenGetParameters(ParticleRBFRayGen);
+  RayGenData *rasterRayGenData = gprtRayGenGetParameters(ParticleRasterRayGen);
+
+  raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
+  raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
+  raygenData.colormap = gprtTextureGetHandle(colormap);
+  raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
+  raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
 
   float3 initialAABB[2] = {
       {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
@@ -110,8 +140,8 @@ int main(int ac, char **av) {
   };
   auto globalAABBBuffer =
       gprtDeviceBufferCreate<float3>(context, 2, initialAABB);
-  rayGenData->globalAABB = gprtBufferGetHandle(globalAABBBuffer);
-  rayGenData->rbfRadius = rbfRadius;
+  raygenData.globalAABB = gprtBufferGetHandle(globalAABBBuffer);
+  raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -121,7 +151,7 @@ int main(int ac, char **av) {
       gprtDeviceBufferCreate<float4>(context, numParticles, nullptr);
   auto aabbBuffer =
       gprtDeviceBufferCreate<float3>(context, 2 * numParticles, nullptr);
-  auto particleGeom = gprtGeomCreate<ParticleData>(context, particleSplatType);
+  auto particleGeom = gprtGeomCreate<ParticleData>(context, particleType);
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
                         numParticles /* just one aabb */);
 
@@ -133,16 +163,17 @@ int main(int ac, char **av) {
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
 
   // also assign particles to raygen
-  rayGenData->particles = gprtBufferGetHandle(particleBuffer);
+  raygenData.particles = gprtBufferGetHandle(particleBuffer);
 
   // same parameters go to these compute programs too
   ParticleData *genParticlesData = gprtComputeGetParameters(GenParticles);
   ParticleData *genRBFBoundsData = gprtComputeGetParameters(GenRBFBounds);
   *genParticlesData = *particleRecord;
   *genRBFBoundsData = *particleRecord;
+  *splatRayGenData = *rbfRayGenData = *rasterRayGenData = raygenData;
 
   // Upload parameters
-  gprtBuildShaderBindingTable(context);
+  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Generate some particles
   gprtComputeLaunch1D(context, GenParticles, numParticles);
@@ -163,8 +194,23 @@ int main(int ac, char **av) {
   gprtAccelBuild(context, world);
 
   // Assign tree to raygen parameters
-  rayGenData->world = gprtAccelGetHandle(world);
+  raygenData.world = gprtAccelGetHandle(world);
 
+  // For now, allocate a grid of voxels for raster mode
+  uint32_t resolution = 512;
+  auto voxelVolume = gprtDeviceBufferCreate<float4>(
+      context, resolution * resolution * resolution, nullptr);
+  auto voxelVolumeCount = gprtDeviceBufferCreate<float>(
+      context, resolution * resolution * resolution, nullptr);
+  gprtBufferClear(voxelVolume);
+  gprtBufferClear(voxelVolumeCount);
+  uint3 dims = uint3(resolution, resolution, resolution);
+  raygenData.volume = gprtBufferGetHandle(voxelVolume);
+  raygenData.volumeCount = gprtBufferGetHandle(voxelVolumeCount);
+  raygenData.volumeDimensions = dims;
+
+  // copy raygen params
+  *splatRayGenData = *rbfRayGenData = *rasterRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
   ImGG::GradientWidget gradient_widget{};
@@ -172,9 +218,18 @@ int main(int ac, char **av) {
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
+  uint32_t frameID = 1;
   do {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
+
+    static int mode = 0;
+    if (ImGui::RadioButton("Splatting", &mode, 0))
+      frameID = 1;
+    if (ImGui::RadioButton("RBF Query", &mode, 1))
+      frameID = 1;
+    if (ImGui::RadioButton("Rasterized", &mode, 2))
+      frameID = 1;
 
     if (gradient_widget.widget("My Gradient") || firstFrame) {
       auto make_8bit = [](const float f) -> uint32_t {
@@ -197,6 +252,22 @@ int main(int ac, char **av) {
         ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
       }
       gprtTextureUnmap(colormap);
+
+      frameID = 1;
+
+      if (mode == 2 || firstFrame) {
+        // voxelize
+        auto accumParams =
+            gprtComputeGetParameters<RayGenData>(AccumulateRBFBounds);
+        auto avgParams = gprtComputeGetParameters<RayGenData>(AverageRBFBounds);
+        *accumParams = *avgParams = raygenData;
+        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+        gprtBufferClear(voxelVolume);
+        gprtBufferClear(voxelVolumeCount);
+        gprtComputeLaunch1D(context, AccumulateRBFBounds, numParticles);
+        gprtComputeLaunch1D(context, AverageRBFBounds,
+                            dims.x * dims.y * dims.z);
+      }
     }
 
     float speed = .001f;
@@ -207,10 +278,28 @@ int main(int ac, char **av) {
       lastxpos = xpos;
       lastypos = ypos;
     }
+
+    float dx = xpos - lastxpos;
+    float dy = ypos - lastypos;
+
     int state = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_LEFT);
+    int rstate = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_RIGHT);
+    int mstate = gprtGetMouseButton(context, GPRT_MOUSE_BUTTON_MIDDLE);
+
+    int w_state = gprtGetKey(context, GPRT_KEY_W);
+    int c_state = gprtGetKey(context, GPRT_KEY_C);
+    int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
+
+    // close window on Ctrl-W press
+    if (w_state && ctrl_state) {
+      break;
+    }
+    // close window on Ctrl-C press
+    if (c_state && ctrl_state) {
+      break;
+    }
 
     // If we click the mouse, we should rotate the camera
-    // Here, we implement some simple camera controls
     if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -222,8 +311,8 @@ int main(int ac, char **av) {
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
       float deltaAngleY = (M_PI / fbSize.y);
-      float xAngle = (lastxpos - xpos) * deltaAngleX;
-      float yAngle = (lastypos - ypos) * deltaAngleY;
+      float xAngle = -dx * deltaAngleX;
+      float yAngle = -dy * deltaAngleY;
 
       // step 2: Rotate the camera around the pivot point on the first axis.
       float4x4 rotationMatrixX = rotation_matrix(rotation_quat(lookUp, xAngle));
@@ -246,23 +335,119 @@ int main(int ac, char **av) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      RayGenData *raygenData = gprtRayGenGetParameters(ParticleSplatRayGen);
-      raygenData->camera.pos = camera_pos;
-      raygenData->camera.dir_00 = camera_d00;
-      raygenData->camera.dir_du = camera_ddu;
-      raygenData->camera.dir_dv = camera_ddv;
+      raygenData.camera.pos = camera_pos;
+      raygenData.camera.dir_00 = camera_d00;
+      raygenData.camera.dir_du = camera_ddu;
+      raygenData.camera.dir_dv = camera_ddv;
+
+      frameID = 1;
     }
 
+    if (rstate == GPRT_PRESS && !io.WantCaptureMouse) {
+      float3 view_vec = lookFrom - lookAt;
+
+      if (dy > 0.0) {
+        view_vec.x *= 0.95;
+        view_vec.y *= 0.95;
+        view_vec.z *= 0.95;
+      } else if (dy < 0.0) {
+        view_vec.x *= 1.05;
+        view_vec.y *= 1.05;
+        view_vec.z *= 1.05;
+      }
+
+      lookFrom = lookAt + view_vec;
+
+      raygenData.camera.pos = lookFrom;
+
+      frameID = 1;
+    }
+
+    if (mstate == GPRT_PRESS && !io.WantCaptureMouse) {
+      float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
+      float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
+      float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
+
+      float3 translation = lookRight * dx + lookUp * -dy;
+      translation = translation * .01f;
+
+      lookFrom = lookFrom + translation;
+      lookAt = lookAt + translation;
+
+      // ----------- compute variable values  ------------------
+      float3 camera_pos = lookFrom;
+      float3 camera_d00 = normalize(lookAt - lookFrom);
+      float aspect = float(fbSize.x) / float(fbSize.y);
+      float3 camera_ddu =
+          cosFovy * aspect * normalize(cross(camera_d00, lookUp));
+      float3 camera_ddv = cosFovy * normalize(cross(camera_ddu, camera_d00));
+      camera_d00 -= 0.5f * camera_ddu;
+      camera_d00 -= 0.5f * camera_ddv;
+
+      // ----------- set variables  ----------------------------
+      raygenData.camera.pos = camera_pos;
+      raygenData.camera.dir_00 = camera_d00;
+      raygenData.camera.dir_du = camera_ddu;
+      raygenData.camera.dir_dv = camera_ddv;
+
+      frameID = 1;
+    }
+
+    static float clampMaxCumulativeValue = 1.f;
+    static float unit = 0.1f;
+    if (ImGui::SliderFloat("clamp max cumulative value",
+                           &clampMaxCumulativeValue, 0.f, 10.f))
+      frameID = 1;
+    if (ImGui::InputFloat("delta tracking unit value", &unit))
+      frameID = 1;
+
+    unit = std::max(unit, .001f);
+    static float azimuth = 0.f;
+    static float elevation = 0.f;
+    static float ambient = .5f;
+
+    if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
+      frameID = 1;
+    if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
+      frameID = 1;
+    if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
+      frameID = 1;
     ImGui::EndFrame();
+
+    raygenData.frameID = frameID;
+    raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
+    raygenData.unit = unit;
+    raygenData.light.ambient = ambient;
+    raygenData.light.elevation = elevation;
+    raygenData.light.azimuth = azimuth;
+
+    particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
+
+    // copy raygen params
+    *splatRayGenData = *rbfRayGenData = *rasterRayGenData = raygenData;
+    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
 
-    gprtBuildShaderBindingTable(context, GPRT_SBT_RAYGEN);
+    switch (mode) {
+    case 0:
+      gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y);
+      break;
+    case 1:
+      gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y);
+      break;
+    case 2:
+      gprtRayGenLaunch2D(context, ParticleRasterRayGen, fbSize.x, fbSize.y);
+      break;
+    default:
+      break;
+    }
 
-    gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y);
     gprtBufferPresent(context, frameBuffer);
+
+    frameID++;
   } while (!gprtWindowShouldClose(context));
 
   LOG("cleaning up ...");
@@ -271,12 +456,17 @@ int main(int ac, char **av) {
   gprtBufferDestroy(aabbBuffer);
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(ParticleSplatRayGen);
+  gprtRayGenDestroy(ParticleRBFRayGen);
+  gprtRayGenDestroy(ParticleRasterRayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(particleAccel);
   gprtAccelDestroy(world);
   gprtGeomDestroy(particleGeom);
-  gprtGeomTypeDestroy(particleSplatType);
-  gprtModuleDestroy(module);
+  gprtGeomTypeDestroy(particleType);
+  gprtModuleDestroy(moduleCommon);
+  gprtModuleDestroy(moduleSplat);
+  gprtModuleDestroy(moduleRBF);
+  gprtModuleDestroy(moduleRaster);
   gprtContextDestroy(context);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");
