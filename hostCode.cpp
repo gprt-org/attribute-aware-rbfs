@@ -44,7 +44,7 @@
 extern GPRTProgram deviceCodeCommon;
 extern GPRTProgram deviceCodeSplat;
 extern GPRTProgram deviceCodeRBF;
-extern GPRTProgram deviceCodeRaster;
+extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 const int2 fbSize = {1000, 1000};
@@ -67,7 +67,7 @@ int main(int ac, char **av) {
   GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);
   GPRTModule moduleSplat = gprtModuleCreate(context, deviceCodeSplat);
   GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
-  GPRTModule moduleRaster = gprtModuleCreate(context, deviceCodeRaster);
+  GPRTModule moduleVoxel = gprtModuleCreate(context, deviceCodeVoxel);
 
   auto GenParticles =
       gprtComputeCreate<ParticleData>(context, moduleCommon, "GenParticles");
@@ -96,8 +96,8 @@ int main(int ac, char **av) {
   GPRTRayGenOf<RayGenData> ParticleRBFRayGen =
       gprtRayGenCreate<RayGenData>(context, moduleRBF, "ParticleRBFRayGen");
 
-  GPRTRayGenOf<RayGenData> ParticleRasterRayGen = gprtRayGenCreate<RayGenData>(
-      context, moduleRaster, "ParticleRasterRayGen");
+  GPRTRayGenOf<RayGenData> ParticleVoxelRayGen =
+      gprtRayGenCreate<RayGenData>(context, moduleVoxel, "ParticleVoxelRayGen");
 
   RayGenData raygenData = {};
 
@@ -124,7 +124,7 @@ int main(int ac, char **av) {
 
   RayGenData *splatRayGenData = gprtRayGenGetParameters(ParticleSplatRayGen);
   RayGenData *rbfRayGenData = gprtRayGenGetParameters(ParticleRBFRayGen);
-  RayGenData *rasterRayGenData = gprtRayGenGetParameters(ParticleRasterRayGen);
+  RayGenData *voxelRayGenData = gprtRayGenGetParameters(ParticleVoxelRayGen);
 
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
@@ -170,7 +170,7 @@ int main(int ac, char **av) {
   ParticleData *genRBFBoundsData = gprtComputeGetParameters(GenRBFBounds);
   *genParticlesData = *particleRecord;
   *genRBFBoundsData = *particleRecord;
-  *splatRayGenData = *rbfRayGenData = *rasterRayGenData = raygenData;
+  *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
 
   // Upload parameters
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
@@ -197,7 +197,7 @@ int main(int ac, char **av) {
   raygenData.world = gprtAccelGetHandle(world);
 
   // For now, allocate a grid of voxels for raster mode
-  uint32_t resolution = 512;
+  uint32_t resolution = 256;
   auto voxelVolume = gprtDeviceBufferCreate<float4>(
       context, resolution * resolution * resolution, nullptr);
   auto voxelVolumeCount = gprtDeviceBufferCreate<float>(
@@ -210,7 +210,7 @@ int main(int ac, char **av) {
   raygenData.volumeDimensions = dims;
 
   // copy raygen params
-  *splatRayGenData = *rbfRayGenData = *rasterRayGenData = raygenData;
+  *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
   ImGG::GradientWidget gradient_widget{};
@@ -228,7 +228,7 @@ int main(int ac, char **av) {
       frameID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
       frameID = 1;
-    if (ImGui::RadioButton("Rasterized", &mode, 2))
+    if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
     if (gradient_widget.widget("My Gradient") || firstFrame) {
@@ -424,7 +424,7 @@ int main(int ac, char **av) {
     particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
 
     // copy raygen params
-    *splatRayGenData = *rbfRayGenData = *rasterRayGenData = raygenData;
+    *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     gprtTextureClear(guiDepthAttachment);
@@ -439,7 +439,7 @@ int main(int ac, char **av) {
       gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y);
       break;
     case 2:
-      gprtRayGenLaunch2D(context, ParticleRasterRayGen, fbSize.x, fbSize.y);
+      gprtRayGenLaunch2D(context, ParticleVoxelRayGen, fbSize.x, fbSize.y);
       break;
     default:
       break;
@@ -457,7 +457,7 @@ int main(int ac, char **av) {
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(ParticleSplatRayGen);
   gprtRayGenDestroy(ParticleRBFRayGen);
-  gprtRayGenDestroy(ParticleRasterRayGen);
+  gprtRayGenDestroy(ParticleVoxelRayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(particleAccel);
   gprtAccelDestroy(world);
@@ -466,7 +466,7 @@ int main(int ac, char **av) {
   gprtModuleDestroy(moduleCommon);
   gprtModuleDestroy(moduleSplat);
   gprtModuleDestroy(moduleRBF);
-  gprtModuleDestroy(moduleRaster);
+  gprtModuleDestroy(moduleVoxel);
   gprtContextDestroy(context);
 
   LOG_OK("seems all went OK; app is done, this should be the last output ...");

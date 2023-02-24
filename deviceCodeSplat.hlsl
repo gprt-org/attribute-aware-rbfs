@@ -55,25 +55,17 @@ struct SplatPayload {
   }
 };
 
-// P is the particle center
-// X is the intersection point
-// r is the radius of the particle
-float evaluate_rbf(float3 X, float3 P, float r) {
-  return exp( -pow(distance(X, P), 2.f) / pow(r, 2.f) );
-}
-
-float4 over(float4 a, float4 b) {
-  float4 result;
-  result.a = a.a + b.a * (1.f - a.a);
-  result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
-  return result;
-}
-
 GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
+  int frameId = record.frameID; // todo, change per frame
+  LCGRand rng = get_rng(frameId, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+  
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
+
+  float3 rt = gprt::load<float3>(record.globalAABB, 1);
+  float3 lb = gprt::load<float3>(record.globalAABB, 0);
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
@@ -82,30 +74,8 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
 
-  // typical ray AABB intersection test
-  float3 dirfrac; // direction is unit direction vector of ray
-  dirfrac.x = 1.0f / rayDesc.Direction.x;
-  dirfrac.y = 1.0f / rayDesc.Direction.y;
-  dirfrac.z = 1.0f / rayDesc.Direction.z;
-  // lb is the corner of AABB with minimal coordinates - left bottom, rt is maximal corner
-  // origin is origin of ray
-  float3 rt = gprt::load<float3>(record.globalAABB, 1);
-  float t2 = (rt.x - rayDesc.Origin.x) * dirfrac.x;
-  float t4 = (rt.y - rayDesc.Origin.y) * dirfrac.y;
-  float t6 = (rt.z - rayDesc.Origin.z) * dirfrac.z;
-  float3 lb = gprt::load<float3>(record.globalAABB, 0);
-  float t1 = (lb.x - rayDesc.Origin.x) * dirfrac.x;
-  float t3 = (lb.y - rayDesc.Origin.y) * dirfrac.y;
-  float t5 = (lb.z - rayDesc.Origin.z) * dirfrac.z;
-  float tenter = max(max(min(t1, t2), min(t3, t4)), min(t5, t6));
-  float texit = min(min(max(t1, t2), max(t3, t4)), max(t5, t6)); // clip hit to near position
-  // thit0 = max(thit0, rayDesc.TMin);
-  // thit1 = min(thit1, rayDesc.TMax);
-  // if tmax < 0, ray (line) is intersecting AABB, but the whole AABB is behind us
-  bool hit = true;
-  if (texit < 0) { hit = false; }
-  // if tmin > tmax, ray doesn't intersect AABB
-  if (tenter >= texit) { hit = false; }
+  float tenter, texit;
+  bool hit = aabbIntersection(rayDesc, lb, rt, tenter, texit);
 
   // for now, assuming one global radius.
   float radius = record.rbfRadius;
@@ -114,6 +84,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
+  float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
   float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
   if (tenter < texit) {
@@ -140,8 +111,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
                 payload                  // the payload IO
         );
 
-        float val = float(payload.tail) / float(PARTICLE_BUFFER_SIZE - 1);
-
         // if (all(pixelID == centerID)) printf("%d\n", payload.tail);
         payload.sort();
 
@@ -155,8 +124,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
           result_color.rgb += alpha_1msa * color_sample.rgb;
           result_color.a += alpha_1msa;
         }
-
-      //  break;
       }
       tslab += slab_spacing;
     }

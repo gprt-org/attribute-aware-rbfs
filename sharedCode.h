@@ -82,3 +82,65 @@ struct MissProgData {
   alignas(16) float3 color0;
   alignas(16) float3 color1;
 };
+
+#ifdef GPRT_DEVICE
+
+/* shared functions */
+float3 getLightDirection(float azimuth, float elevation) {
+  return float3(
+      sin(elevation * 3.14f - 0.5f * 3.14f) * cos(azimuth * 2.f * 3.14f),
+      sin(elevation * 3.14f - 0.5f * 3.14f) * sin(azimuth * 2.f * 3.14f),
+      cos(elevation * 3.14f - 0.5f * 3.14f));
+}
+
+// P is the particle center
+// X is the intersection point
+// r is the radius of the particle
+float evaluate_rbf(float3 X, float3 P, float r) {
+  return exp(-pow(distance(X, P), 2.f) / pow(r, 2.f));
+}
+
+float4 over(float4 a, float4 b) {
+  float4 result;
+  result.a = a.a + b.a * (1.f - a.a);
+  result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
+  return result;
+}
+
+bool aabbIntersection(in RayDesc rayDesc, float3 aabbMin, float3 aabbMax,
+                      out float tenter, out float texit) {
+  // typical ray AABB intersection test
+  float3 dirfrac; // direction is unit direction vector of ray
+  dirfrac.x = 1.0f / rayDesc.Direction.x;
+  dirfrac.y = 1.0f / rayDesc.Direction.y;
+  dirfrac.z = 1.0f / rayDesc.Direction.z;
+  // lb is the corner of AABB with minimal coordinates - left bottom, rt is
+  // maximal corner origin is origin of ray
+  float3 rt = aabbMax;
+  float t2 = (rt.x - rayDesc.Origin.x) * dirfrac.x;
+  float t4 = (rt.y - rayDesc.Origin.y) * dirfrac.y;
+  float t6 = (rt.z - rayDesc.Origin.z) * dirfrac.z;
+  float3 lb = aabbMin;
+  float t1 = (lb.x - rayDesc.Origin.x) * dirfrac.x;
+  float t3 = (lb.y - rayDesc.Origin.y) * dirfrac.y;
+  float t5 = (lb.z - rayDesc.Origin.z) * dirfrac.z;
+  tenter = max(max(min(t1, t2), min(t3, t4)), min(t5, t6));
+  texit = min(min(max(t1, t2), max(t3, t4)),
+              max(t5, t6)); // clip hit to near position
+  // truncate interval to ray description tmin/max
+  tenter = max(tenter, rayDesc.TMin);
+  texit = min(texit, rayDesc.TMax);
+  // if texit < 0, ray (line) is intersecting AABB, but the whole AABB is behind
+  // us
+  bool hit = true;
+  if (texit < 0) {
+    hit = false;
+  }
+  // if tenter > texit, ray doesn't intersect AABB
+  if (tenter >= texit) {
+    hit = false;
+  }
+  return hit;
+}
+
+#endif

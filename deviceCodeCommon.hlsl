@@ -49,13 +49,6 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
   gprt::atomicMax32f(record.globalAABB, 5, aabbMax.z);
 }
 
-// P is the particle center
-// X is the intersection point
-// r is the radius of the particle
-float evaluate_rbf(float3 X, float3 P, float r) {
-  return exp( -pow(distance(X, P), 2.f) / pow(r, 2.f) );
-}
-
 GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   float4 particle = gprt::load<float4>(record.particles, primID);

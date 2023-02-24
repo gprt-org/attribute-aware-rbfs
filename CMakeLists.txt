@@ -30,10 +30,10 @@ embed_devicecode(
 
 embed_devicecode(
   OUTPUT_TARGET
-    deviceCodeRaster
+    deviceCodeVoxel
   SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeRaster.hlsl
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeVoxel.hlsl
 )
 
 add_executable(viewer hostCode.cpp)
-target_link_libraries(viewer PUBLIC deviceCodeCommon deviceCodeSplat deviceCodeRBF deviceCodeRaster gprt::gprt imgui_gradient::imgui_gradient)
+target_link_libraries(viewer PUBLIC deviceCodeCommon deviceCodeSplat deviceCodeRBF deviceCodeVoxel gprt::gprt imgui_gradient::imgui_gradient)
