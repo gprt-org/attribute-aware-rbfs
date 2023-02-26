@@ -2,10 +2,10 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
 project(point-clouds CXX)
 
-add_subdirectory(3rdParty/gprt)
+add_subdirectory(3rdParty/GPRT)
 
 add_subdirectory(3rdParty/imgui_gradient)
-target_include_directories(imgui_gradient PRIVATE 3rdParty/gprt/3rdParty/)
+target_include_directories(imgui_gradient PUBLIC 3rdParty/GPRT/3rdParty/)
 
 embed_devicecode(
   OUTPUT_TARGET
