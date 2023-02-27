@@ -48,8 +48,8 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   float3 aabbMin = particle.xyz - float3(radius, radius, radius);
   float3 aabbMax = particle.xyz + float3(radius, radius, radius);
 
-  float3 rt = record.globalAABBMin;
-  float3 lb = record.globalAABBMax;
+  float3 rt = record.globalAABBMax;
+  float3 lb = record.globalAABBMin;
   int3 dims = record.volumeDimensions;
 
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
@@ -104,8 +104,6 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
         gprt::atomicAdd32f(record.volume, addr * 4 + 1, xf.g);
         gprt::atomicAdd32f(record.volume, addr * 4 + 2, xf.b);
         gprt::atomicAdd32f(record.volume, addr * 4 + 3, xf.w);
-        
-
         gprt::atomicAdd32f(record.volumeCount, addr, 1.f);
       }
     }

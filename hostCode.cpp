@@ -65,7 +65,7 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-float rbfRadius = .05f;
+float rbfRadius = .1f;
 std::vector<float4> particles;
 
 
@@ -92,8 +92,13 @@ int main(int argc, char *argv[]) {
   if (dbscanPath != "") importArborX(dbscanPath, particleData);
 
   else {
-    // a single lonely particle ;(
-    particleData.push_back({0, {0.f, 0.f, 0.f, 1.f}});
+    particleData.resize(10000);
+    for (uint32_t i = 0; i < particleData.size(); ++i) {
+      float t = float(i) / float(particleData.size());
+      particleData[i].second = float4(t * sin(t * 256.f * 3.14f),  
+                                      t * cos(t * 256.f * 3.14f), 
+                                      0.f, 1.f);
+    }
   }
 
   float3 aabb[2] = {
@@ -106,8 +111,8 @@ int main(int argc, char *argv[]) {
   std::cout<<"Computing bounding box..."<<std::endl;
 
   for (size_t i = 0; i < particleData.size(); ++i) {    
-    aabb[0] = linalg::min(aabb[0], particleData[i].second.xyz());
-    aabb[1] = linalg::max(aabb[1], particleData[i].second.xyz());
+    aabb[0] = linalg::min(aabb[0], particleData[i].second.xyz() - rbfRadius);
+    aabb[1] = linalg::max(aabb[1], particleData[i].second.xyz() + rbfRadius);
   }
   std::cout<<" - Done!"<<std::endl;
 
@@ -327,20 +332,7 @@ int main(int argc, char *argv[]) {
 
       frameID = 1;
 
-      if (mode == 2 && !voxelized) {
-        // voxelize
-        auto accumParams =
-            gprtComputeGetParameters<RayGenData>(AccumulateRBFBounds);
-        auto avgParams = gprtComputeGetParameters<RayGenData>(AverageRBFBounds);
-        *accumParams = *avgParams = raygenData;
-        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-        gprtBufferClear(voxelVolume);
-        gprtBufferClear(voxelVolumeCount);
-        gprtComputeLaunch1D(context, AccumulateRBFBounds, particles.size());
-        gprtComputeLaunch1D(context, AverageRBFBounds,
-                            dims.x * dims.y * dims.z);
-        voxelized = true;
-      }
+      voxelized = false;
     }
 
     float speed = .001f;
@@ -486,6 +478,21 @@ int main(int argc, char *argv[]) {
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
       frameID = 1;
     ImGui::EndFrame();
+
+    // if we need to, revoxelize
+    if (mode == 2 && !voxelized) {
+      auto accumParams =
+          gprtComputeGetParameters<RayGenData>(AccumulateRBFBounds);
+      auto avgParams = gprtComputeGetParameters<RayGenData>(AverageRBFBounds);
+      *accumParams = *avgParams = raygenData;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+      gprtBufferClear(voxelVolume);
+      gprtBufferClear(voxelVolumeCount);
+      gprtComputeLaunch1D(context, AccumulateRBFBounds, particles.size());
+      gprtComputeLaunch1D(context, AverageRBFBounds,
+                          dims.x * dims.y * dims.z);
+      voxelized = true;
+    }
 
     raygenData.frameID = frameID;
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
