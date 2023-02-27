@@ -34,67 +34,7 @@
 
 #include <fstream>
 
-#ifdef ARBORX
-// For importing HACC data
-#include <ArborX_DBSCAN.hpp>
-using ArborX::ExperimentalHyperGeometry::Point;
-template <int DIM>
-std::vector<Point<DIM>> loadData(std::string const &filename,
-                                 bool binary = true, int max_num_points = -1)
-{
-  std::cout << "Reading in \"" << filename << "\" in "
-            << (binary ? "binary" : "text") << " mode...";
-  std::cout.flush();
-
-  std::ifstream input;
-  if (!binary)
-    input.open(filename);
-  else
-    input.open(filename, std::ifstream::binary);
-  ARBORX_ASSERT(input.good());
-
-  std::vector<Point<DIM>> v;
-
-  int num_points = 0;
-  int dim = 0;
-  if (!binary)
-  {
-    input >> num_points;
-    input >> dim;
-  }
-  else
-  {
-    input.read(reinterpret_cast<char *>(&num_points), sizeof(int));
-    input.read(reinterpret_cast<char *>(&dim), sizeof(int));
-  }
-
-  ARBORX_ASSERT(dim == DIM);
-
-  if (max_num_points > 0 && max_num_points < num_points)
-    num_points = max_num_points;
-
-  v.resize(num_points);
-  if (!binary)
-  {
-    auto it = std::istream_iterator<float>(input);
-    for (int i = 0; i < num_points; ++i)
-      for (int d = 0; d < DIM; ++d)
-        v[i][d] = *it++;
-  }
-  else
-  {
-    // Directly read into a point
-    input.read(reinterpret_cast<char *>(v.data()),
-               num_points * sizeof(Point<DIM>));
-  }
-  input.close();
-  std::cout << "done\nRead in " << num_points << " " << dim << "D points"
-            << std::endl;
-
-  return v;
-}
-#endif
-
+#include "importers/arborx.h"
 #include <argparse/argparse.hpp>
 
 // For parallel sorting of points along a hilbert curve
@@ -125,7 +65,6 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-uint32_t numParticles = 10000;
 float rbfRadius = .05f;
 std::vector<float4> particles;
 
@@ -150,28 +89,10 @@ int main(int argc, char *argv[]) {
   std::vector<std::pair<uint64_t, float4>> particleData;
 
   std::string dbscanPath = program.get<std::string>("--dbscan");
-  if (dbscanPath != "") { 
-    #ifdef ARBORX
-    std::cout << dbscanPath << std::endl;
-    auto result = loadData<3>(dbscanPath);
-
-    // Add particles to our particle array, computing AABB along the way 
-    numParticles = result.size();
-    particleData.resize(numParticles);
-
-    for (size_t i = 0; i < numParticles; ++i) {    
-      particleData[i].second = float4(result[i][0], result[i][1], result[i][2], 1.f);
-    }
-    #else
-    std::cerr << "ARBORX support not compiled into viewer" << std::endl;
-    std::cerr << program;
-    std::exit(1);
-    #endif
-  }
+  if (dbscanPath != "") importArborX(dbscanPath, particleData);
 
   else {
     // a single lonely particle ;(
-    numParticles = 1;
     particleData.push_back({0, {0.f, 0.f, 0.f, 1.f}});
   }
 
@@ -184,7 +105,7 @@ int main(int argc, char *argv[]) {
 
   std::cout<<"Computing bounding box..."<<std::endl;
 
-  for (size_t i = 0; i < numParticles; ++i) {    
+  for (size_t i = 0; i < particleData.size(); ++i) {    
     aabb[0] = linalg::min(aabb[0], particleData[i].second.xyz());
     aabb[1] = linalg::max(aabb[1], particleData[i].second.xyz());
   }
@@ -213,8 +134,8 @@ int main(int argc, char *argv[]) {
   std::cout<<" - Done!"<<std::endl;
 
   // here just transferring to a vector we can actually use.
-  particles.resize(numParticles);
-  for (size_t i = 0; i < numParticles; ++i) particles[i] = particleData[i].second;
+  particles.resize(particleData.size());
+  for (size_t i = 0; i < particles.size(); ++i) particles[i] = particleData[i].second;
   particleData.clear();
 
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
@@ -297,15 +218,15 @@ int main(int argc, char *argv[]) {
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   auto particleBuffer =
-      gprtDeviceBufferCreate<float4>(context, numParticles, nullptr);
+      gprtDeviceBufferCreate<float4>(context, particles.size(), nullptr);
   auto aabbBuffer =
-      gprtDeviceBufferCreate<float3>(context, 2 * numParticles, nullptr);
+      gprtDeviceBufferCreate<float3>(context, 2 * particles.size(), nullptr);
   auto particleGeom = gprtGeomCreate<ParticleData>(context, particleType);
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
-                        numParticles /* just one aabb */);
+                        particles.size() /* just one aabb */);
 
   ParticleData *particleRecord = gprtGeomGetParameters(particleGeom);
-  particleRecord->numParticles = numParticles;
+  particleRecord->numParticles = particles.size();
   particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
@@ -325,17 +246,17 @@ int main(int argc, char *argv[]) {
 
   // Generate some particles
   if (particles.size() == 0) {
-    gprtComputeLaunch1D(context, GenParticles, numParticles);
+    gprtComputeLaunch1D(context, GenParticles, particles.size());
   }
   else {
     gprtBufferMap(particleBuffer);
     float4* particlePositions = gprtBufferGetPointer(particleBuffer);
-    memcpy(particlePositions, particles.data(), sizeof(float4) * numParticles);
+    memcpy(particlePositions, particles.data(), sizeof(float4) * particles.size());
     gprtBufferUnmap(particleBuffer);
   }
 
   // Generate bounding boxes for those particles
-  gprtComputeLaunch1D(context, GenRBFBounds, numParticles);
+  gprtComputeLaunch1D(context, GenRBFBounds, particles.size());
 
   // Now we can build the tree
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
@@ -415,7 +336,7 @@ int main(int argc, char *argv[]) {
         gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
         gprtBufferClear(voxelVolume);
         gprtBufferClear(voxelVolumeCount);
-        gprtComputeLaunch1D(context, AccumulateRBFBounds, numParticles);
+        gprtComputeLaunch1D(context, AccumulateRBFBounds, particles.size());
         gprtComputeLaunch1D(context, AverageRBFBounds,
                             dims.x * dims.y * dims.z);
         voxelized = true;
