@@ -2,10 +2,16 @@ cmake_minimum_required(VERSION 3.10 FATAL_ERROR)
 
 project(point-clouds CXX)
 
+add_subdirectory(3rdParty/argparse)
 add_subdirectory(3rdParty/GPRT)
 
 add_subdirectory(3rdParty/imgui_gradient)
 target_include_directories(imgui_gradient PUBLIC 3rdParty/GPRT/3rdParty/)
+
+option(BUILD_ARBORX "Build ArborX Library for DBScan Dataset" ON)
+if (${BUILD_ARBORX})
+add_subdirectory(3rdParty/ArborX)
+endif()
 
 embed_devicecode(
   OUTPUT_TARGET
@@ -35,5 +41,31 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeVoxel.hlsl
 )
 
+set(LIBRARIES 
+  deviceCodeCommon 
+  deviceCodeSplat 
+  deviceCodeRBF
+  deviceCodeVoxel 
+  gprt::gprt 
+  imgui_gradient::imgui_gradient 
+  argparse 
+)
+set(COMPILE_DEFINITIONS)
+
 add_executable(viewer hostCode.cpp)
-target_link_libraries(viewer PUBLIC deviceCodeCommon deviceCodeSplat deviceCodeRBF deviceCodeVoxel gprt::gprt imgui_gradient::imgui_gradient)
+
+if (${BUILD_ARBORX})
+set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
+set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DARBORX)
+endif()
+
+find_package(TBB)
+
+if (${TBB_FOUND})
+set(LIBRARIES ${LIBRARIES} TBB::tbb)
+else(${TBB_FOUND})
+message(WARN "Could NOT find TBB")
+endif()
+
+target_link_libraries(viewer PUBLIC ${LIBRARIES})
+target_compile_definitions(viewer PUBLIC ${COMPILE_DEFINITIONS})

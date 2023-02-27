@@ -39,14 +39,6 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
   float3 aabbMax = particle.xyz + float3(radius, radius, radius);
   gprt::store(record.aabbs, 2 * primID, aabbMin);
   gprt::store(record.aabbs, 2 * primID + 1, aabbMax);
-
-  // compute world bounding box
-  gprt::atomicMin32f(record.globalAABB, 0, aabbMin.x);
-  gprt::atomicMin32f(record.globalAABB, 1, aabbMin.y);
-  gprt::atomicMin32f(record.globalAABB, 2, aabbMin.z);
-  gprt::atomicMax32f(record.globalAABB, 3, aabbMax.x);
-  gprt::atomicMax32f(record.globalAABB, 4, aabbMax.y);
-  gprt::atomicMax32f(record.globalAABB, 5, aabbMax.z);
 }
 
 GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
@@ -56,8 +48,8 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   float3 aabbMin = particle.xyz - float3(radius, radius, radius);
   float3 aabbMax = particle.xyz + float3(radius, radius, radius);
 
-  float3 rt = gprt::load<float3>(record.globalAABB, 1);
-  float3 lb = gprt::load<float3>(record.globalAABB, 0);
+  float3 rt = record.globalAABBMin;
+  float3 lb = record.globalAABBMax;
   int3 dims = record.volumeDimensions;
 
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);

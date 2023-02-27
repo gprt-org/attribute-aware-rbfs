@@ -35,7 +35,6 @@ struct ParticleData {
   alignas(4) float clampMaxCumulativeValue;
   alignas(16) gprt::Buffer particles;
   alignas(16) gprt::Buffer aabbs;
-  alignas(16) gprt::Buffer globalAABB;
 };
 
 struct RayGenData {
@@ -45,7 +44,8 @@ struct RayGenData {
   alignas(4) uint32_t frameID;
 
   alignas(16) gprt::Accel world;
-  alignas(16) gprt::Buffer globalAABB;
+  alignas(16) float3 globalAABBMin;
+  alignas(16) float3 globalAABBMax;
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
   alignas(16) gprt::Buffer particles;

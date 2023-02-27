@@ -64,8 +64,8 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
-  float3 rt = gprt::load<float3>(record.globalAABB, 1);
-  float3 lb = gprt::load<float3>(record.globalAABB, 0);
+  float3 rt = record.globalAABBMin;
+  float3 lb = record.globalAABBMax;
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;

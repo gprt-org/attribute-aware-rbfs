@@ -32,6 +32,76 @@
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
 
+#include <fstream>
+
+#ifdef ARBORX
+// For importing HACC data
+#include <ArborX_DBSCAN.hpp>
+using ArborX::ExperimentalHyperGeometry::Point;
+template <int DIM>
+std::vector<Point<DIM>> loadData(std::string const &filename,
+                                 bool binary = true, int max_num_points = -1)
+{
+  std::cout << "Reading in \"" << filename << "\" in "
+            << (binary ? "binary" : "text") << " mode...";
+  std::cout.flush();
+
+  std::ifstream input;
+  if (!binary)
+    input.open(filename);
+  else
+    input.open(filename, std::ifstream::binary);
+  ARBORX_ASSERT(input.good());
+
+  std::vector<Point<DIM>> v;
+
+  int num_points = 0;
+  int dim = 0;
+  if (!binary)
+  {
+    input >> num_points;
+    input >> dim;
+  }
+  else
+  {
+    input.read(reinterpret_cast<char *>(&num_points), sizeof(int));
+    input.read(reinterpret_cast<char *>(&dim), sizeof(int));
+  }
+
+  ARBORX_ASSERT(dim == DIM);
+
+  if (max_num_points > 0 && max_num_points < num_points)
+    num_points = max_num_points;
+
+  v.resize(num_points);
+  if (!binary)
+  {
+    auto it = std::istream_iterator<float>(input);
+    for (int i = 0; i < num_points; ++i)
+      for (int d = 0; d < DIM; ++d)
+        v[i][d] = *it++;
+  }
+  else
+  {
+    // Directly read into a point
+    input.read(reinterpret_cast<char *>(v.data()),
+               num_points * sizeof(Point<DIM>));
+  }
+  input.close();
+  std::cout << "done\nRead in " << num_points << " " << dim << "D points"
+            << std::endl;
+
+  return v;
+}
+#endif
+
+#include <argparse/argparse.hpp>
+
+// For parallel sorting of points along a hilbert curve
+#include <execution>
+#include <algorithm>
+#include "hilbert.h"
+
 #define LOG(message)                                                           \
   std::cout << GPRT_TERMINAL_BLUE;                                             \
   std::cout << "#gprt.sample(main): " << message << std::endl;                 \
@@ -56,10 +126,97 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 uint32_t numParticles = 10000;
-float rbfRadius = .01f;
+float rbfRadius = .05f;
+std::vector<float4> particles;
+
 
 #include <iostream>
-int main(int ac, char **av) {
+int main(int argc, char *argv[]) { 
+  argparse::ArgumentParser program("RT Point Clouds");
+
+  program.add_argument("--dbscan")
+    .help("A path to a DBScan dataset (ending in .arborx)")
+    .default_value("");
+
+  try {
+    program.parse_args(argc, argv);
+  }
+  catch (const std::runtime_error& err) {
+    std::cerr << err.what() << std::endl;
+    std::cerr << program;
+    std::exit(1);
+  }
+
+  std::vector<std::pair<uint64_t, float4>> particleData;
+
+  std::string dbscanPath = program.get<std::string>("--dbscan");
+  if (dbscanPath != "") { 
+    #ifdef ARBORX
+    std::cout << dbscanPath << std::endl;
+    auto result = loadData<3>(dbscanPath);
+
+    // Add particles to our particle array, computing AABB along the way 
+    numParticles = result.size();
+    particleData.resize(numParticles);
+
+    for (size_t i = 0; i < numParticles; ++i) {    
+      particleData[i].second = float4(result[i][0], result[i][1], result[i][2], 1.f);
+    }
+    #else
+    std::cerr << "ARBORX support not compiled into viewer" << std::endl;
+    std::cerr << program;
+    std::exit(1);
+    #endif
+  }
+
+  else {
+    // a single lonely particle ;(
+    numParticles = 1;
+    particleData.push_back({0, {0.f, 0.f, 0.f, 1.f}});
+  }
+
+  float3 aabb[2] = {
+      {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
+       std::numeric_limits<float>::max()},
+      {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
+       -std::numeric_limits<float>::max()},
+  };
+
+  std::cout<<"Computing bounding box..."<<std::endl;
+
+  for (size_t i = 0; i < numParticles; ++i) {    
+    aabb[0] = linalg::min(aabb[0], particleData[i].second.xyz());
+    aabb[1] = linalg::max(aabb[1], particleData[i].second.xyz());
+  }
+  std::cout<<" - Done!"<<std::endl;
+
+  // set focus to aabb
+  lookAt = (aabb[1] + aabb[0]) * .5f;
+  
+  // Now, we compute hilbert codes per-point
+  std::cout<<"Computing hilbert codes..."<<std::endl;
+  std::for_each(std::execution::par_unseq, std::begin(particleData), 
+    std::end(particleData), [&](auto &&i) 
+  {
+    float3 tmp = (i.second.xyz() - aabb[0]) / (aabb[1] - aabb[0]);
+    tmp.x = tmp.x * (float)(1 << 16);
+    tmp.y = tmp.y * (float)(1 << 16);
+    tmp.z = tmp.z * (float)(1 << 16);
+    const bitmask_t coord[3] = {bitmask_t(tmp.x), bitmask_t(tmp.y), bitmask_t(tmp.z)};
+    i.first = hilbert_c2i(3, 16, coord);
+  });
+  
+  std::cout<<" - Done!"<<std::endl;
+
+  std::cout<<"Sorting points along hilbert curve..."<<std::endl;  
+  std::sort(std::execution::par_unseq, particleData.begin(), particleData.end());
+  std::cout<<" - Done!"<<std::endl;
+
+  // here just transferring to a vector we can actually use.
+  particles.resize(numParticles);
+  for (size_t i = 0; i < numParticles; ++i) particles[i] = particleData[i].second;
+  particleData.clear();
+
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
   gprtRequestRayTypeCount(2);
 
@@ -131,16 +288,8 @@ int main(int ac, char **av) {
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
-
-  float3 initialAABB[2] = {
-      {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
-       std::numeric_limits<float>::max()},
-      {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
-       -std::numeric_limits<float>::max()},
-  };
-  auto globalAABBBuffer =
-      gprtDeviceBufferCreate<float3>(context, 2, initialAABB);
-  raygenData.globalAABB = gprtBufferGetHandle(globalAABBBuffer);
+  raygenData.globalAABBMin = aabb[0];
+  raygenData.globalAABBMax = aabb[1];
   raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -159,7 +308,6 @@ int main(int ac, char **av) {
   particleRecord->numParticles = numParticles;
   particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
-  particleRecord->globalAABB = gprtBufferGetHandle(globalAABBBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
 
   // also assign particles to raygen
@@ -176,16 +324,18 @@ int main(int ac, char **av) {
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
   // Generate some particles
-  gprtComputeLaunch1D(context, GenParticles, numParticles);
+  if (particles.size() == 0) {
+    gprtComputeLaunch1D(context, GenParticles, numParticles);
+  }
+  else {
+    gprtBufferMap(particleBuffer);
+    float4* particlePositions = gprtBufferGetPointer(particleBuffer);
+    memcpy(particlePositions, particles.data(), sizeof(float4) * numParticles);
+    gprtBufferUnmap(particleBuffer);
+  }
 
   // Generate bounding boxes for those particles
   gprtComputeLaunch1D(context, GenRBFBounds, numParticles);
-
-  gprtBufferMap(globalAABBBuffer);
-  float3 *tmp = gprtBufferGetPointer(globalAABBBuffer);
-  std::cout << tmp[0].x << " " << tmp[0].y << " " << tmp[0].z << std::endl;
-  std::cout << tmp[1].x << " " << tmp[1].y << " " << tmp[1].z << std::endl;
-  gprtBufferUnmap(globalAABBBuffer);
 
   // Now we can build the tree
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
@@ -215,6 +365,7 @@ int main(int ac, char **av) {
 
   ImGG::GradientWidget gradient_widget{};
 
+  bool voxelized = false;
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
@@ -255,7 +406,7 @@ int main(int ac, char **av) {
 
       frameID = 1;
 
-      if (mode == 2 || firstFrame) {
+      if (mode == 2 && !voxelized) {
         // voxelize
         auto accumParams =
             gprtComputeGetParameters<RayGenData>(AccumulateRBFBounds);
@@ -267,6 +418,7 @@ int main(int ac, char **av) {
         gprtComputeLaunch1D(context, AccumulateRBFBounds, numParticles);
         gprtComputeLaunch1D(context, AverageRBFBounds,
                             dims.x * dims.y * dims.z);
+        voxelized = true;
       }
     }
 
