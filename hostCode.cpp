@@ -87,8 +87,16 @@ int main(int argc, char *argv[])
       .help("A path to a MMPLD dataset (ending in .mmpld)")
       .default_value("");
 
-  try
-  {
+  program.add_argument("--camera")
+    .nargs(10)
+    .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
+    .default_value(std::vector<float>{3.5f, 3.5f, 3.5f,
+                                      0.f, 0.f, 0.f,
+                                      0.f, -1.f, 0.f,
+                                      0.66f})
+    .scan<'g', float>();
+
+  try {
     program.parse_args(argc, argv);
   }
   catch (const std::runtime_error &err)
@@ -119,6 +127,12 @@ int main(int argc, char *argv[])
                                          0.f, t);
     }
   }
+
+  std::vector<float> camParams = program.get<std::vector<float>>("--camera");
+  lookFrom = float3(camParams[0], camParams[1], camParams[2]);
+  lookAt = float3(camParams[3], camParams[4], camParams[5]);
+  lookUp = float3(camParams[6], camParams[7], camParams[8]);
+  cosFovy = camParams[9];
 
   float3 aabb[2] = {
       {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
