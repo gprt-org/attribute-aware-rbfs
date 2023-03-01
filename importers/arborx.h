@@ -69,7 +69,7 @@ void importArborX(std::string path, std::vector<std::pair<uint64_t, float4>> &pa
     particleData.resize(result.size());
 
     for (size_t i = 0; i < result.size(); ++i) {    
-      particleData[i].second = float4(result[i][0], result[i][1], result[i][2], 1.f);
+      particleData[i].second = float4(result[i][0], result[i][1], result[i][2], float(i) / float(result.size()));
     }
     #else
     std::cerr << "ARBORX support not compiled into viewer" << std::endl;

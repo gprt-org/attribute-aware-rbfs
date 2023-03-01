@@ -30,6 +30,7 @@
 /* variables available to all programs */
 
 struct ParticleData {
+  alignas(4) uint32_t particlesPerLeaf;
   alignas(4) uint32_t numParticles;
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
@@ -59,6 +60,11 @@ struct RayGenData {
   alignas(16) gprt::Buffer volume;
   alignas(16) gprt::Buffer volumeCount;
   alignas(16) uint3 volumeDimensions;
+
+  // For DDA
+  alignas(16) gprt::Buffer minMaxVolume;
+  alignas(16) gprt::Buffer majorants;
+  alignas(16) uint3 ddaDimensions;
 
   // For controling the relative density of delta tracking
   alignas(4) float unit;
@@ -98,6 +104,12 @@ float3 getLightDirection(float azimuth, float elevation) {
 // r is the radius of the particle
 float evaluate_rbf(float3 X, float3 P, float r) {
   return exp(-pow(distance(X, P), 2.f) / pow(r, 2.f));
+}
+
+// d is the squared distance from the particle center to the intersection point
+// r is the radius of the particle
+float evaluate_rbf(float d, float r) {
+  return exp(-d / pow(r, 2.f));
 }
 
 float4 over(float4 a, float4 b) {
@@ -143,4 +155,79 @@ bool aabbIntersection(in RayDesc rayDesc, float3 aabbMin, float3 aabbMax,
   return hit;
 }
 
+// minDist computes the square of the distance from a point to a rectangle.
+// If the point is contained in the rectangle then the distance is zero.
+//
+// Implemented per Definition 2 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+float minDist(float3 p, float3 rmin, float3 rmax) {
+	float sum = 0.0f;
+  for (int i = 0; i < 3; ++i) {
+    // if point is left of min
+    if (p[i] < rmin[i]) {
+      // take distance to left wall
+      float d = p[i] - rmin[i];
+      sum += d * d;
+    } 
+    // else if point is right of max
+    else if (p[i] > rmax[i]) {
+      // take distance to right wall
+      float d = p[i] - rmax[i];
+      sum += d * d;
+    } 
+    // else point is between the two
+    else {
+      sum += 0;
+    } 
+  }
+  return sum;
+}
+
+// maxDist computes the square of the distance from a point to a rectangle.
+float maxDist(float3 p, float3 rmin, float3 rmax) {
+	float sum = 0.0f;
+  for (int i = 0; i < 3; ++i) {
+    // take the max distance for this dimension and sum the square
+    float d1 = p[i] - rmin[i];
+    float d2 = p[i] - rmax[i];
+    float d = max(d1, d2);
+    sum += d * d;
+  }
+  return sum;
+}
+
+// minMaxDist computes the minimum of the maximum distances from p to points
+// on r.  If r is the bounding box of some geometric objects, then there is
+// at least one object contained in r within minMaxDist(p, r) of p.
+//
+// Implemented per Definition 4 of "Nearest Neighbor Queries" by
+// N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
+float minMaxDist(float3 p, float3 rmin, float3 rmax) {
+	// by definition, MinMaxDist(p, r) =
+	// min{1<=k<=n}(|pk - rmk|^2 + sum{1<=i<=n, i != k}(|pi - rMi|^2))
+	// where rmk and rMk are defined as follows:
+	
+	// This formula can be computed in linear time by precomputing
+	// S = sum{1<=i<=n}(|pi - rMi|^2).
+
+	float S = 0.0f;
+	for (int i = 0; i < 3; ++i) {
+		float d = p[i] - ((p[i] >= (rmin[i]+rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
+		S += d * d;
+	}
+
+	// Compute MinMaxDist using the precomputed S.
+	float minimum = 3.402823466e+38F;
+	for (int i = 0; i < 3; ++i)
+  {
+		float d1 = p[i] - ((p[i] >= (rmin[i]+rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
+		float d2 = p[i] - ((p[i] <= (rmin[i]+rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
+		float d = S - d1*d1 + d2*d2;
+		if (d < minimum) {
+			minimum = d;
+		}
+	}
+
+	return minimum;
+}
 #endif

@@ -148,27 +148,35 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 }
 
 GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
-  uint primID = PrimitiveIndex();
-  float3 center = gprt::load<float4>(record.particles, primID).xyz;
-  float radius = record.rbfRadius;
-  float3 origin = WorldRayOrigin();
-  float3 direction = WorldRayDirection();
-  float t = distance(center, origin);
-  float3 sample_pos = origin + t * direction;
-  float3 offset = center - sample_pos;
+  uint clusterID = PrimitiveIndex();
+  uint32_t particlesPerLeaf = record.particlesPerLeaf;
+  uint32_t numParticles = record.numParticles;
+  
+  for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
+    uint32_t primID = clusterID * particlesPerLeaf + i;
+    if (primID >= numParticles) break;
 
-  float tmin = RayTMin();
-  float tmax = RayTCurrent();
+    float3 center = gprt::load<float4>(record.particles, primID).xyz;
+    float radius = record.rbfRadius;
+    float3 origin = WorldRayOrigin();
+    float3 direction = WorldRayDirection();
+    float t = distance(center, origin);
+    float3 sample_pos = origin + t * direction;
+    float3 offset = center - sample_pos;
 
-  uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 centerID = DispatchRaysDimensions().xy / 2;
+    float tmin = RayTMin();
+    float tmax = RayTCurrent();
 
-  if ((dot(offset, offset) < radius * radius) && (tmin <= t) && (t < tmax)) 
-  {
-    ParticleSample attr;
-    attr.t = t;
-    attr.id = primID;
-    ReportHit(t, /*hitKind*/ 0, attr);
+    uint2 pixelID = DispatchRaysIndex().xy;
+    uint2 centerID = DispatchRaysDimensions().xy / 2;
+
+    if ((dot(offset, offset) < radius * radius) && (tmin <= t) && (t < tmax)) 
+    {
+      ParticleSample attr;
+      attr.t = t;
+      attr.id = primID;
+      ReportHit(t, /*hitKind*/ 0, attr);
+    }
   }
 }
 

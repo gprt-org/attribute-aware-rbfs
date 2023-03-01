@@ -178,47 +178,28 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 }
 
 GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
-  uint primID = PrimitiveIndex();
-  float3 center = gprt::load<float4>(record.particles, primID).xyz;
-  float radius = record.rbfRadius;
-  float3 origin = WorldRayOrigin();
-  if (distance(center, origin) < radius) {
-    RBFPayload attr;
-    attr.test = 42;
-    attr.density = evaluate_rbf(center, origin, radius);
-
-    uint2 pixelID = DispatchRaysIndex().xy;
-    uint2 centerID = DispatchRaysDimensions().xy / 2;
-    // if (all(pixelID == centerID)) {
-    //   printf("INTERSECTION Prim %d data %f %d\n", primID, attr.density, attr.test);
-    // }
-    ReportHit(0.0f, 0, attr);
-
-    // uint2 pixelID = DispatchRaysIndex().xy;
-    // uint2 centerID = DispatchRaysDimensions().xy / 2;
-    // if (all(pixelID == centerID)) {
-    //   printf("data value %f\n", hit_particle.density);
-    // }
+  uint clusterID = PrimitiveIndex();
+  uint32_t particlesPerLeaf = record.particlesPerLeaf;
+  uint32_t numParticles = record.numParticles;
+  
+  for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
+    uint32_t primID = clusterID * particlesPerLeaf + i;
+    if (primID >= numParticles) break;
+    
+    float3 center = gprt::load<float4>(record.particles, primID).xyz;
+    float radius = record.rbfRadius;
+    float3 origin = WorldRayOrigin();
+    if (distance(center, origin) < radius) {
+      RBFPayload attr;
+      attr.test = 42;
+      attr.density = evaluate_rbf(center, origin, radius);
+      ReportHit(0.0f, 0, attr);
+    }
   }
 }
 
 GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, payload), (RBFPayload, hit_particle)) {
-  uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 centerID = DispatchRaysDimensions().xy / 2;
-
-  // float density = asfloat(HitKind());
-  // if (all(pixelID == centerID)) {
-  //   printf("ANYHIT Prim %d data %f %d\n", PrimitiveIndex(), hit_particle.density, hit_particle.test);
-  // }
-
-  // payload = hit_particle;
-  // payload.density = density;
-
   payload.density += hit_particle.density;
-  // {
-  // }
-
-  
   if (record.clampMaxCumulativeValue > 0.f) {
     payload.density = min(payload.density, record.clampMaxCumulativeValue);
     gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
