@@ -63,7 +63,10 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
 
     Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
     gprt::Buffer volume = record.volume;
+    gprt::Buffer majorants = record.majorants;
+    gprt::Buffer minMaxVolume = record.minMaxVolume;
     uint3 dims = record.volumeDimensions;
+    uint3 majorantDims = record.ddaDimensions;
     SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
 
     float4 albedo = float4(0.f, 0.f, 0.f, 0.f);
@@ -78,11 +81,24 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
       // Update current position
       float3 x = rayDesc.Origin + t * rayDesc.Direction;
 
+
+      #define VIS_DDA
+      #ifdef VIS_DDA
+      
+      // Sample heterogeneous media
+      float3 nx = (x - lb) / (rt - lb);
+      int3 voxel = min(nx * majorantDims, majorantDims - 1);
+      float tmp = gprt::load<float>(majorants, voxel.x + voxel.y * majorantDims.x + voxel.z * majorantDims.x * majorantDims.y);
+      float4 xf = float4(tmp, tmp, tmp, .1);
+
+      #else
+
       // Sample heterogeneous media
       float3 nx = (x - lb) / (rt - lb);
       int3 voxel = min(nx * dims, dims - 1);
       float4 xf = gprt::load<float4>(volume, voxel.x + voxel.y * dims.x + voxel.z * dims.x * dims.y);
 
+      #endif
       // if (all(pixelID == centerID) && !stop) {
       //   printf("Sampled volume %lu %f %f %f %f\n", volume.x, xf.x, xf.y, xf.z, xf.w);
       //   stop = true;
@@ -112,9 +128,24 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
         ts = ts - (log(1.0f - lcg_randomf(rng)) / majorantExtinction) * unit;
         if (ts >= shadowTExit) break;
         float3 x = shadowRay.Origin + ts * shadowRay.Direction;
+        
+        #ifdef VIS_DDA
+        // Sample heterogeneous media
+        float3 nx = (x - lb) / (rt - lb);
+        int3 voxel = min(nx * majorantDims, majorantDims - 1);
+        float tmp = gprt::load<float>(majorants, voxel.x + voxel.y * majorantDims.x + voxel.z * majorantDims.x * majorantDims.y);
+        float4 xf = float4(tmp, tmp, tmp, .1);
+        #else
+        // Sample heterogeneous media
         float3 nx = (x - lb) / (rt - lb);
         int3 voxel = min(nx * dims, dims - 1);
         float4 xf = gprt::load<float4>(volume, voxel.x + voxel.y * dims.x + voxel.z * dims.x * dims.y);
+        #endif
+
+        
+        // float3 nx = (x - lb) / (rt - lb);
+        // int3 voxel = min(nx * dims, dims - 1);
+        // float4 xf = gprt::load<float4>(volume, voxel.x + voxel.y * dims.x + voxel.z * dims.x * dims.y);
         if (lcg_randomf(rng) < xf.w / (majorantExtinction)) {
           visibility = 0.f;
           break;

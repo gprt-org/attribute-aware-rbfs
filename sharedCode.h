@@ -188,8 +188,8 @@ float maxDist(float3 p, float3 rmin, float3 rmax) {
 	float sum = 0.0f;
   for (int i = 0; i < 3; ++i) {
     // take the max distance for this dimension and sum the square
-    float d1 = p[i] - rmin[i];
-    float d2 = p[i] - rmax[i];
+    float d1 = abs(p[i] - rmin[i]);
+    float d2 = abs(p[i] - rmax[i]);
     float d = max(d1, d2);
     sum += d * d;
   }
@@ -229,5 +229,47 @@ float minMaxDist(float3 p, float3 rmin, float3 rmax) {
 	}
 
 	return minimum;
+}
+
+float3 worldPosToGrid(float3 worldPt, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+  float3 gridPt = worldPt;
+  // translate so that world AABB min is origin
+  gridPt = gridPt - worldAABBMin;
+  // scale down by the span of the world AABB
+  gridPt = gridPt / (worldAABBMax - worldAABBMin);
+  // scale up by the grid
+  gridPt = gridPt * float3(gridDimensions);
+  // assuming grid origin is at 0,0
+  return gridPt;
+}
+
+float3 gridPosToWorld(float3 gridPt, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+  float3 worldPt = gridPt;
+  // scale down by the grid
+  worldPt = worldPt / float3(gridDimensions);
+  // scale up by the world
+  worldPt = worldPt * (worldAABBMax - worldAABBMin);
+  // offset back into the world
+  worldPt = worldPt + worldAABBMin;
+  return worldPt;
+}
+
+float3 worldDirToGrid(float3 worldDir, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+  float3 gridDir = worldDir;
+  // scale down by the span of the world AABB
+  gridDir = gridDir / (worldAABBMax - worldAABBMin);
+  // scale up by the grid
+  gridDir = gridDir * float3(gridDimensions);
+  // assuming grid origin is at 0,0
+  return gridDir;
+}
+
+float3 gridDirToWorld(float3 gridDir, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+  float3 worldDir = gridDir;
+  // scale down by the grid
+  worldDir = worldDir / float3(gridDimensions);
+  // scale up by the world
+  worldDir = worldDir * (worldAABBMax - worldAABBMin);
+  return worldDir;
 }
 #endif

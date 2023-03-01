@@ -165,6 +165,8 @@ int main(int argc, char *argv[]) {
       gprtComputeCreate<RayGenData>(context, moduleCommon, "AverageRBFBounds");
   auto MinMaxRBFBounds =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "MinMaxRBFBounds");
+  auto ClearMinMaxGrid =
+      gprtComputeCreate<RayGenData>(context, moduleCommon, "ClearMinMaxGrid");
   auto ComputeMajorantGrid =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "ComputeMajorantGrid");
 
@@ -292,7 +294,6 @@ int main(int argc, char *argv[]) {
       context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
   auto majorantVolume = gprtDeviceBufferCreate<float>(
       context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
-  gprtBufferClear(minMaxVolume);
   raygenData.minMaxVolume = gprtBufferGetHandle(minMaxVolume);  
   raygenData.majorants = gprtBufferGetHandle(majorantVolume);
   uint3 ddaDimensions = uint3(ddaGridResolution, ddaGridResolution, ddaGridResolution);
@@ -304,10 +305,15 @@ int main(int argc, char *argv[]) {
 
   // compute minmax ranges
   {
+    // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
     auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
     *params = raygenData;
     gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-    gprtComputeLaunch1D(context, MinMaxRBFBounds, particleData.size());
+
+    uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+    // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
+    gprtBufferClear(minMaxVolume);    
+    gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size());
   }
 
   ImGG::GradientWidget gradient_widget{};
@@ -535,6 +541,9 @@ int main(int argc, char *argv[]) {
 
     // if we need to, recompute majorants 
     if (majorantsOutOfDate) {
+
+      gprtBufferClear(majorantVolume);
+
       auto params = gprtComputeGetParameters<RayGenData>(ComputeMajorantGrid);
       *params = raygenData;
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
