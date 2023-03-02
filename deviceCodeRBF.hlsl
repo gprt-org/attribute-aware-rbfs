@@ -37,7 +37,7 @@ class ParticleTracker {
   LCGRand rng;
   float unit;
   float clampMaxCumulativeValue;
-  RayDesc rayDesc;
+  // RayDesc rayDesc;
 
   float4 albedo;
   float t;
@@ -49,7 +49,10 @@ class ParticleTracker {
   gprt::Sampler cmapSampler; 
   gprt::Accel tree;
 
-  bool lambda(int3 cell, float t0, float t1) {    
+  float3 lb;
+  float3 rt;
+
+  bool lambda(RayDesc ray, int3 cell, float t0, float t1) {    
     float majorant = gprt::load<float>(
       majorants,
       cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
@@ -61,6 +64,9 @@ class ParticleTracker {
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
+
+    float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
+    float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
 
     // float 
     t = t0;
@@ -74,7 +80,7 @@ class ParticleTracker {
       }
 
       // Update current position
-      float3 x = rayDesc.Origin + t * rayDesc.Direction;
+      float3 x = org + t * dir;
 
       // Sample heterogeneous media
       RayDesc pointDesc;
@@ -145,13 +151,14 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   tracker.i = 0;
   tracker.rng = rng;
   tracker.unit = record.unit;
-  tracker.rayDesc = rayDesc;
   tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
   tracker.dbg = false;
   tracker.cmap = record.colormap;
   tracker.cmapSampler = record.colormapSampler;
   tracker.tree = record.world;
+  tracker.lb = lb;
+  tracker.rt = rt;
   
   float4 color = float4(0.f, 0.f, 0.f, 0.f);
 
@@ -171,10 +178,13 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     // }
 
     // compute origin and dir in voxel space
-    float3 org = worldPosToGrid(rayDesc.Origin, lb, rt, tracker.dimensions);
-    float3 dir = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
+    RayDesc ddaRay;
+    ddaRay.Origin = worldPosToGrid(rayDesc.Origin, lb, rt, tracker.dimensions);
+    ddaRay.Direction = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
+    ddaRay.TMin = 0.f;
+    ddaRay.TMax = texit;
     tracker.t = tenter;
-    dda3(org, dir, 1e20f, tracker.dimensions, false, tracker);
+    dda3(ddaRay, tracker.dimensions, false, tracker);
 
     // tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
     // tracker.dda3(org, dir, texit, tracker.dimensions, false);
@@ -244,21 +254,30 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       // #undef DDA
       #ifdef DDA
 
-      tracker.rayDesc = shadowRay;
-      tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
-      tracker.dbg = false;
-
-      if (all(pixelID == centerID)) {
-        dbg = true;
-        tracker.dbg = true;
-      }
-
-      // compute origin and dir in voxel space
-      float3 org = worldPosToGrid(shadowRay.Origin, lb, rt, tracker.dimensions);
-      float3 dir = worldDirToGrid(shadowRay.Direction, lb, rt, tracker.dimensions);
+      RayDesc ddaRay;
+      ddaRay.Origin = worldPosToGrid(shadowRay.Origin, lb, rt, tracker.dimensions);
+      ddaRay.Direction = worldDirToGrid(shadowRay.Direction, lb, rt, tracker.dimensions);
+      ddaRay.TMin = 0.f;
+      ddaRay.TMax = shadowTExit;
       tracker.t = 0.1f;
       tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
-      dda3(org, dir, 1e20f, tracker.dimensions, false, tracker);
+      tracker.dbg = false;
+      dda3(ddaRay, tracker.dimensions, false, tracker);
+
+      
+      // if (all(pixelID == centerID)) {
+      //   dbg = true;
+      //   tracker.dbg = true;
+      // }
+
+      // compute origin and dir in voxel space
+      // float3 org = worldPosToGrid(shadowRay.Origin, lb, rt, tracker.dimensions);
+      // float3 dir = worldDirToGrid(shadowRay.Direction, lb, rt, tracker.dimensions);
+      // tracker.t = 0.1f;
+      // tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
+      // dda3(org, dir, 1e20f, tracker.dimensions, false, tracker);
+
+
       float ts = tracker.t;
 
       // if (dbg) printf("shadow albedo %f %f %f %f\n", tracker.albedo.x, tracker.albedo.y, tracker.albedo.z, tracker.albedo.w);
