@@ -82,7 +82,7 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
       float3 x = rayDesc.Origin + t * rayDesc.Direction;
 
 
-      #define VIS_DDA
+      // #define VIS_DDA
       #ifdef VIS_DDA
       
       // Sample heterogeneous media

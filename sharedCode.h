@@ -34,6 +34,13 @@ struct ParticleData {
   alignas(4) uint32_t numParticles;
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
+  
+  // A switch to visualize either RBF density or per-particle attributes
+  alignas(4) int visualizeAttributes;
+  alignas(16) gprt::Texture densitymap;
+  alignas(16) gprt::Texture colormap;
+  alignas(16) gprt::Sampler colormapSampler;
+
   alignas(16) gprt::Buffer particles;
   alignas(16) gprt::Buffer aabbs;
 };
@@ -52,6 +59,7 @@ struct RayGenData {
   alignas(16) gprt::Buffer particles;
 
   // colormap for visualization
+  alignas(16) gprt::Texture densitymap;
   alignas(16) gprt::Texture colormap;
   alignas(16) gprt::Sampler colormapSampler;
 
@@ -68,6 +76,15 @@ struct RayGenData {
 
   // For controling the relative density of delta tracking
   alignas(4) float unit;
+
+  // A switch to visualize either RBF density or per-particle attributes
+  alignas(4) int visualizeAttributes;
+
+  // A switch to enable or disable DDA (accelerates volume rendering)
+  alignas(4) int useDDA;
+
+  // If true, renders the time that it takes to render the given image
+  alignas(4) int showHeatmap;
 
   struct {
     alignas(4) float azimuth;

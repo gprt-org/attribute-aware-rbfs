@@ -271,7 +271,7 @@ GPRT_COMPUTE_PROGRAM(ComputeMajorantGrid, (RayGenData, record), (1,1,1)) {
   gprt::store<float>(record.majorants, voxelID, majorant);
 }
 
-struct NullPayload{
+struct [raypayload] NullPayload{
   int tmp;
 };
 

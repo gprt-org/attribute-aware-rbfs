@@ -66,7 +66,7 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 uint32_t particlesPerLeaf = 8;
-float rbfRadius = .1f;
+float rbfRadius = .1f; //3.f;
 std::vector<float4> particles;
 
 uint32_t structuredGridResolution = 256;
@@ -98,8 +98,8 @@ int main(int argc, char *argv[]) {
     particleData.resize(10000);
     for (uint32_t i = 0; i < particleData.size(); ++i) {
       float t = float(i) / float(particleData.size());
-      particleData[i].second = float4(t * sin(t * 256.f * 3.14f),  
-                                      t * cos(t * 256.f * 3.14f), 
+      particleData[i].second = float4(100.f * t * sin(t * 256.f * 3.14f),  
+                                      100.f * t * cos(t * 256.f * 3.14f), 
                                       0.f, t);
     }
   }
@@ -208,7 +208,11 @@ int main(int argc, char *argv[]) {
   // Colormap for visualization
   auto colormap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
                                                     GPRT_FORMAT_R8G8B8A8_SRGB,
-                                                    256, 1, 1, false, nullptr);
+                                                    64, 1, 1, false, nullptr);
+
+  auto densitymap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
+                                                    GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                    64, 1, 1, false, nullptr);
 
   auto sampler =
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
@@ -220,6 +224,7 @@ int main(int argc, char *argv[]) {
 
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
+  raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
@@ -245,6 +250,9 @@ int main(int argc, char *argv[]) {
   particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
+  particleRecord->colormap = gprtTextureGetHandle(colormap);
+  particleRecord->densitymap = gprtTextureGetHandle(densitymap);
+  particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
@@ -316,7 +324,8 @@ int main(int argc, char *argv[]) {
     gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size());
   }
 
-  ImGG::GradientWidget gradient_widget{};
+  ImGG::GradientWidget colormapWidget{};
+  ImGG::GradientWidget densitymapWidget{};
 
   bool majorantsOutOfDate = true;
   bool voxelized = false;
@@ -336,7 +345,7 @@ int main(int argc, char *argv[]) {
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
-    if (gradient_widget.widget("My Gradient") || firstFrame) {
+    if (colormapWidget.widget("Attribute Colormap") || firstFrame) {
       auto make_8bit = [](const float f) -> uint32_t {
         return std::min(255, std::max(0, int(f * 256.f)));
       };
@@ -351,15 +360,42 @@ int main(int argc, char *argv[]) {
 
       gprtTextureMap(colormap);
       uint32_t *ptr = gprtTextureGetPointer(colormap);
-      for (uint32_t i = 0; i < 256; ++i) {
-        auto result = gradient_widget.gradient().at(
-            ImGG::RelativePosition(float(i + 1) / 257.f));
+      for (uint32_t i = 0; i < 64; ++i) {
+        auto result = colormapWidget.gradient().at(
+            ImGG::RelativePosition(float(i + 1) / 65.f));
         ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
       }
       gprtTextureUnmap(colormap);
 
       frameID = 1;
 
+      voxelized = false;
+      majorantsOutOfDate = true;
+    }
+
+    if (densitymapWidget.widget("Density Colormap") || firstFrame) {
+      auto make_8bit = [](const float f) -> uint32_t {
+        return std::min(255, std::max(0, int(f * 256.f)));
+      };
+
+      auto make_rgba = [make_8bit](float4 color) -> uint32_t {
+        float gamma = 2.2;
+        color =
+            pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
+        return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) +
+               (make_8bit(color.z) << 16) + (make_8bit(color.w) << 24);
+      };
+
+      gprtTextureMap(densitymap);
+      uint32_t *ptr = gprtTextureGetPointer(densitymap);
+      for (uint32_t i = 0; i < 64; ++i) {
+        auto result = densitymapWidget.gradient().at(
+            ImGG::RelativePosition(float(i + 1) / 65.f));
+        ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
+      }
+      gprtTextureUnmap(densitymap);
+
+      frameID = 1;
       voxelized = false;
       majorantsOutOfDate = true;
     }
@@ -490,13 +526,21 @@ int main(int argc, char *argv[]) {
     static float clampMaxCumulativeValue = 1.f;
     static float unit = 0.1f;
     if (ImGui::SliderFloat("clamp max cumulative value",
-                           &clampMaxCumulativeValue, 0.f, 10.f)) {
+                           &clampMaxCumulativeValue, 0.f, 100.f)) {
       frameID = 1;
       majorantsOutOfDate = true;
       voxelized = false;
     }
     if (ImGui::InputFloat("delta tracking unit value", &unit))
       frameID = 1;
+    
+    static bool visualizeAttributes = true;
+    if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes)) 
+    {
+      frameID = 1;
+      // majorantsOutOfDate = true; // might do this later...
+      voxelized = false;
+    }
 
     unit = std::max(unit, .001f);
     static float azimuth = 0.f;
@@ -514,11 +558,13 @@ int main(int argc, char *argv[]) {
     raygenData.frameID = frameID;
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
     raygenData.unit = unit;
+    raygenData.visualizeAttributes = visualizeAttributes;
     raygenData.light.ambient = ambient;
     raygenData.light.elevation = elevation;
     raygenData.light.azimuth = azimuth;
 
     particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
+    particleRecord->visualizeAttributes = visualizeAttributes;
 
     // copy raygen params
     *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;

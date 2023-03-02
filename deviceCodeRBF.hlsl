@@ -25,9 +25,15 @@
 #include "rng.h"
 #include "dda.hlsli"
 
-struct RBFPayload {
-  uint32_t test;
+struct RBFAttribute {
   float density;
+  float attribute;
+};
+
+struct [raypayload] RBFPayload {
+  uint32_t count;
+  float density;
+  float3 rgb;
 };
 
 class ParticleTracker {
@@ -43,8 +49,10 @@ class ParticleTracker {
   float t;
 
   bool dbg;
+  bool visualizeAttributes;
 
   gprt::Buffer majorants;
+  gprt::Texture dmap;
   gprt::Texture cmap;
   gprt::Sampler cmapSampler; 
   gprt::Accel tree;
@@ -64,6 +72,7 @@ class ParticleTracker {
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
+    Texture1D densitymap = gprt::getTexture1DHandle(dmap);
 
     float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
     float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
@@ -89,7 +98,9 @@ class ParticleTracker {
       pointDesc.TMin = 0.0;
       pointDesc.TMax = 0.0;
       RBFPayload payload; 
+      payload.count = 0;
       payload.density = 0.f;       
+      payload.rgb = float3(0.f, 0.f, 0.f);
       TraceRay(accel,                  // the tree
               RAY_FLAG_NONE,           // ray flags
               0xff,                    // instance inclusion mask
@@ -99,12 +110,18 @@ class ParticleTracker {
               pointDesc,               // the ray to trace
               payload                  // the payload IO
       );
-
+      if (payload.count > 0) {
+        payload.rgb /= float(payload.count);
+        payload.rgb = pow(payload.rgb, 1.f / 2.f);
+      }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
-      float4 xf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+      float4 xf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
 
       if (lcg_randomf(rng) < xf.w / (majorant)) {
-        albedo = float4(xf.rgb, 1.f);
+        if (visualizeAttributes)
+          albedo = float4(payload.rgb, 1.f);
+        else
+          albedo = float4(xf.rgb, 1.f);
         return false; // terminate traversal
       }
     }
@@ -151,9 +168,11 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   tracker.i = 0;
   tracker.rng = rng;
   tracker.unit = record.unit;
+  tracker.visualizeAttributes = record.visualizeAttributes;
   tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
   tracker.dbg = false;
+  tracker.dmap = record.densitymap;
   tracker.cmap = record.colormap;
   tracker.cmapSampler = record.colormapSampler;
   tracker.tree = record.world;
@@ -221,6 +240,8 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       pointDesc.TMax = 0.0;
       RBFPayload payload; 
       payload.density = 0.f;       
+      payload.count = 0;
+      payload.rgb = float3(0.f, 0.f, 0.f);
       TraceRay(world,         // the tree
               RAY_FLAG_NONE,   // ray flags
               0xff,                    // instance inclusion mask
@@ -230,10 +251,18 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
               pointDesc,               // the ray to trace
               payload                  // the payload IO
       );
+      if (payload.count > 0) {
+        payload.rgb /= float(payload.count);
+        payload.rgb = pow(payload.rgb, 1.f / 2.f);
+      }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
-      float4 xf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+      float4 xf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+
       if (lcg_randomf(rng) < xf.w / (majorantExtinction)) {
-        albedo = float4(xf.rgb, 1.f);
+        if (visualizeAttributes) 
+          albedo = float4(payload.rgb, 1.f);
+        else
+          albedo = float4(xf.rgb, 1.f);
         break;
       }
     }
@@ -298,7 +327,10 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         pointDesc.TMin = 0.0;
         pointDesc.TMax = 0.0;
         RBFPayload payload; 
+        payload.density = 0.f;   
+        payload.count = 0;
         payload.density = 0.f;       
+        payload.rgb = float3(0.f, 0.f, 0.f);    
         TraceRay(world,         // the tree
                 RAY_FLAG_NONE,   // ray flags
                 0xff,                    // instance inclusion mask
@@ -357,23 +389,33 @@ GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
     uint32_t primID = clusterID * particlesPerLeaf + i;
     if (primID >= numParticles) break;
     
-    float3 center = gprt::load<float4>(record.particles, primID).xyz;
+    float4 particle = gprt::load<float4>(record.particles, primID);
     float radius = record.rbfRadius;
     float3 origin = WorldRayOrigin();
-    if (distance(center, origin) < radius) {
-      RBFPayload attr;
-      attr.test = 42;
-      attr.density = evaluate_rbf(center, origin, radius);
+    if (distance(particle.xyz, origin) < radius) {
+      RBFAttribute attr;
+      attr.attribute = particle.w;
+      attr.density = evaluate_rbf(particle.xyz, origin, radius);
       ReportHit(0.0f, 0, attr);
     }
   }
 }
 
-GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, payload), (RBFPayload, hit_particle)) {
+GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, payload), (RBFAttribute, hit_particle)) {
+  payload.count += 1;
   payload.density += hit_particle.density;
+  
+  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
+  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  float3 rgb = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f).rgb;
+
+  payload.rgb += pow(rgb, 2.f);
+  
   if (record.clampMaxCumulativeValue > 0.f) {
     payload.density = min(payload.density, record.clampMaxCumulativeValue);
-    gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
+    // if we're visualizing attributes, we need to continue accumulating color
+    if (!record.visualizeAttributes)
+      gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
   }
   gprt::ignoreHit(); // forces traversal to continue
 }
