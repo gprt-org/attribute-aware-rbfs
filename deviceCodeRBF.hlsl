@@ -23,6 +23,7 @@
 #include "sharedCode.h"
 
 #include "rng.h"
+#include "dda.hlsli"
 
 struct RBFPayload {
   uint32_t test;
@@ -30,7 +31,7 @@ struct RBFPayload {
 };
 
 class ParticleTracker {
-  gprt::Buffer majorants;
+  
   uint3 dimensions;
   int i;
   LCGRand rng;
@@ -43,21 +44,23 @@ class ParticleTracker {
 
   bool dbg;
 
+  gprt::Buffer majorants;
+  gprt::Texture cmap;
+  gprt::Sampler cmapSampler; 
+  gprt::Accel tree;
 
-  bool lambda(int3 cell, float t0, float t1, in Texture1D cmap, in SamplerState sampler, in RaytracingAccelerationStructure tree) {    
-    if (any(cell >= dimensions)) return true; // skip
-    
+  bool lambda(int3 cell, float t0, float t1) {    
     float majorant = gprt::load<float>(
       majorants,
       cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
     );
 
-    // if (dbg) {
-    //   printf("DDA majorant %f\n", majorant);
-    // }
-
     // skip to the next cell
     if (majorant <= 0.f) return true; 
+
+    RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
+    SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
+    Texture1D colormap = gprt::getTexture1DHandle(cmap);
 
     // float 
     t = t0;
@@ -81,7 +84,7 @@ class ParticleTracker {
       pointDesc.TMax = 0.0;
       RBFPayload payload; 
       payload.density = 0.f;       
-      TraceRay(tree,                  // the tree
+      TraceRay(accel,                  // the tree
               RAY_FLAG_NONE,           // ray flags
               0xff,                    // instance inclusion mask
               0,                       // ray type
@@ -92,169 +95,17 @@ class ParticleTracker {
       );
 
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
-      float4 xf = cmap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+      float4 xf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
 
-      // xf.w = majorant; // TEMPORARY
-      // float4 xf = float4(majorant, majorant, majorant, majorant);
       if (lcg_randomf(rng) < xf.w / (majorant)) {
         albedo = float4(xf.rgb, 1.f);
-        // if (dbg) printf("Hit at %f, albedo is \n", t, albedo.x, albedo.y, albedo.z, albedo.w);
         return false; // terminate traversal
       }
-    }
-
-    if (dbg) {
-      printf("ERROR, terminating early\n");
     }
 
     // stop traversal if we hit our sampling limit (avoids lockup)
     return false;
   };
-
-  void dda3(float3 org,
-            float3 dir,
-            float tMax,
-            uint3 gridSize,
-            bool dbg,
-            in Texture1D cmap, in SamplerState sampler, in RaytracingAccelerationStructure tree
-            )
-  {    
-    float3 boundsMin = float3(0.f, 0.f, 0.f);
-    float3 boundsMax = float3(gridSize);
-    float3 floor_org = floor(org);
-    float3 floor_org_plus_one = floor_org + 1.f;
-    float3 rcp_dir = rcp(dir);
-    float3 abs_rcp_dir = abs(rcp_dir);
-    float3 f_size = float3(gridSize);
-    
-    float3 t_lo = (float3(0.f, 0.f, 0.f) - org) * rcp_dir;
-    float3 t_hi = (f_size     - org) * rcp_dir;
-    float3 t_nr = min(t_lo,t_hi);
-    float3 t_fr = max(t_lo,t_hi);
-    if (dir.x == 0.f) {
-      if (org.x < 0.f || org.x > f_size.x)
-        // ray passes by the volume ...
-        return;
-      t_nr.x = -1.#INF; t_fr.x = 1.#INF;
-    }
-    if (dir.y == 0.f) {
-      if (org.y < 0.f || org.y > f_size.y)
-        // ray passes by the volume ...
-        return;
-      t_nr.y = -1.#INF; t_fr.y = 1.#INF;
-    }
-    if (dir.z == 0.f) {
-      if (org.z < 0.f || org.z > f_size.z)
-        // ray passes by the volume ...
-        return;
-      t_nr.z = -1.#INF; t_fr.z = 1.#INF;
-    }
-    
-    if (dbg) printf("tdir %f %f %f\n",dir.x, dir.y, dir.z);
-
-    float ray_t0 = max(0.f,  max(t_nr.x, max(t_nr.y, t_nr.z)));
-    float ray_t1 = min(tMax, min(t_fr.x, min(t_fr.y, t_fr.z)));
-    if (dbg) printf("t range for volume %f %f\n",ray_t0,ray_t1);
-    if (ray_t0 > ray_t1) return; // no overlap with volume
-    
-    // compute first cell that ray is in:
-    float3 org_in_volume = org + ray_t0 * dir;
-    if (dbg) printf("org in vol %f %f %f size %i %i %i\n",
-                    org_in_volume.x,
-                    org_in_volume.y,
-                    org_in_volume.z,
-                    gridSize.x,
-                    gridSize.y,
-                    gridSize.z);
-    float3 f_cell = max(float3(0.f, 0.f, 0.f),min(f_size-1.f,floor(org_in_volume)));
-    float3 f_cell_end = {
-                        dir.x > 0.f ? f_cell.x+1.f : f_cell.x,
-                        dir.y > 0.f ? f_cell.y+1.f : f_cell.y,
-                        dir.z > 0.f ? f_cell.z+1.f : f_cell.z,
-    };
-    if (dbg)
-      printf("f_cell_end %f %f %f\n",
-             f_cell_end.x,
-             f_cell_end.y,
-             f_cell_end.z);
-    
-    float3 t_step = abs(rcp_dir);
-    if (dbg)
-      printf("t_step %f %f %f\n",
-             t_step.x,
-             t_step.y,
-             t_step.z);
-    float3 t_next
-      = {
-         ((dir.x == 0.f)
-          ? 1.#INF
-          : (abs(f_cell_end.x - org_in_volume.x) * t_step.x)),
-         ((dir.y == 0.f)
-          ? 1.#INF
-          : (abs(f_cell_end.y - org_in_volume.y) * t_step.y)),
-         ((dir.z == 0.f)
-          ? 1.#INF
-          : (abs(f_cell_end.z - org_in_volume.z) * t_step.z))
-    };
-    if (dbg)
-      printf("t_next %f %f %f\n",
-             t_next.x,
-             t_next.y,
-             t_next.z);
-    const int3 stop
-      = {
-         dir.x > 0.f ? (int)gridSize.x : -1,
-         dir.y > 0.f ? (int)gridSize.y : -1,
-         dir.z > 0.f ? (int)gridSize.z : -1
-    };
-    if (dbg)
-      printf("stop %i %i %i\n",
-             stop.x,
-             stop.y,
-             stop.z);
-    const int3 cell_delta
-      = {
-         (dir.x > 0.f ? +1 : -1),
-         (dir.y > 0.f ? +1 : -1),
-         (dir.z > 0.f ? +1 : -1)
-    };
-    if (dbg)
-      printf("cell_delta %i %i %i\n",
-             cell_delta.x,
-             cell_delta.y,
-             cell_delta.z);
-    int3 cell = int3(f_cell);
-    float next_cell_begin = 0.f;
-    while (1) {
-      float t_closest = min(t_next.x, min(t_next.y, t_next.z));
-      const float cell_t0 = ray_t0+next_cell_begin;
-      const float cell_t1 = ray_t0+min(t_closest,tMax);
-      if (dbg)
-        printf("cell %i %i %i dists %f %f %f closest %f t %f %f\n",
-               cell.x,cell.y,cell.z,
-               t_next.x,t_next.y,t_next.z,
-               t_closest,cell_t0,cell_t1);
-      bool wantToGoOn = lambda(cell,cell_t0,cell_t1, cmap, sampler, tree);
-      if (!wantToGoOn)
-        return;
-      next_cell_begin = t_closest;
-      if (t_next.x == t_closest) {
-        t_next.x += t_step.x;
-        cell.x += cell_delta.x;
-        if (cell.x == stop.x) return;
-      }
-      if (t_next.y == t_closest) {
-        t_next.y += t_step.y;
-        cell.y += cell_delta.y;
-        if (cell.y == stop.y) return;
-      }
-      if (t_next.z == t_closest) {
-        t_next.z += t_step.z;
-        cell.z += cell_delta.z;
-        if (cell.z == stop.z) return;
-      }
-    }
-  }
 };
 
 GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
@@ -288,7 +139,6 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
-
   ParticleTracker tracker;
   tracker.majorants = record.majorants;
   tracker.dimensions = record.ddaDimensions;
@@ -299,6 +149,9 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
   tracker.dbg = false;
+  tracker.cmap = record.colormap;
+  tracker.cmapSampler = record.colormapSampler;
+  tracker.tree = record.world;
   
   float4 color = float4(0.f, 0.f, 0.f, 0.f);
 
@@ -306,7 +159,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     bool dbg = false;
     if (all(pixelID == centerID)) {
       dbg = true;
-      // tracker.dbg = true;
+      tracker.dbg = true;
     }
 
     #define DDA
@@ -321,7 +174,10 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     float3 org = worldPosToGrid(rayDesc.Origin, lb, rt, tracker.dimensions);
     float3 dir = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
     tracker.t = tenter;
-    tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
+    dda3(org, dir, 1e20f, tracker.dimensions, false, tracker);
+
+    // tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
+    // tracker.dda3(org, dir, texit, tracker.dimensions, false);
     float4 albedo = tracker.albedo;
     float t = tracker.t;
     float unit = record.unit;
@@ -388,14 +244,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       // #undef DDA
       #ifdef DDA
 
-      ParticleTracker tracker;
-      tracker.majorants = record.majorants;
-      tracker.dimensions = record.ddaDimensions;
-      tracker.i = 0;
-      tracker.rng = rng;
-      tracker.unit = record.unit;
       tracker.rayDesc = shadowRay;
-      tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
       tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
       tracker.dbg = false;
 
@@ -409,7 +258,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       float3 dir = worldDirToGrid(shadowRay.Direction, lb, rt, tracker.dimensions);
       tracker.t = 0.1f;
       tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
-      tracker.dda3(org, dir, 1e20f, tracker.dimensions, false, colormap, colormapSampler, world);
+      dda3(org, dir, 1e20f, tracker.dimensions, false, tracker);
       float ts = tracker.t;
 
       // if (dbg) printf("shadow albedo %f %f %f %f\n", tracker.albedo.x, tracker.albedo.y, tracker.albedo.z, tracker.albedo.w);
