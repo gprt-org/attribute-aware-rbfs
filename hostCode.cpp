@@ -65,9 +65,12 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-float rbfRadius = .1f;
+uint32_t particlesPerLeaf = 8;
+float rbfRadius = .1f; //3.f;
 std::vector<float4> particles;
 
+uint32_t structuredGridResolution = 256;
+uint32_t ddaGridResolution = 256;
 
 #include <iostream>
 int main(int argc, char *argv[]) { 
@@ -104,9 +107,9 @@ int main(int argc, char *argv[]) {
     particleData.resize(10000);
     for (uint32_t i = 0; i < particleData.size(); ++i) {
       float t = float(i) / float(particleData.size());
-      particleData[i].second = float4(t * sin(t * 256.f * 3.14f),  
-                                      t * cos(t * 256.f * 3.14f), 
-                                      0.f, 1.f);
+      particleData[i].second = float4(100.f * t * sin(t * 256.f * 3.14f),  
+                                      100.f * t * cos(t * 256.f * 3.14f), 
+                                      0.f, t);
     }
   }
 
@@ -175,6 +178,12 @@ int main(int argc, char *argv[]) {
       context, moduleCommon, "AccumulateRBFBounds");
   auto AverageRBFBounds =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "AverageRBFBounds");
+  auto MinMaxRBFBounds =
+      gprtComputeCreate<RayGenData>(context, moduleCommon, "MinMaxRBFBounds");
+  auto ClearMinMaxGrid =
+      gprtComputeCreate<RayGenData>(context, moduleCommon, "ClearMinMaxGrid");
+  auto ComputeMajorantGrid =
+      gprtComputeCreate<RayGenData>(context, moduleCommon, "ComputeMajorantGrid");
 
   auto particleType = gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
   gprtGeomTypeSetIntersectionProg(particleType, 1, moduleSplat,
@@ -214,7 +223,11 @@ int main(int argc, char *argv[]) {
   // Colormap for visualization
   auto colormap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
                                                     GPRT_FORMAT_R8G8B8A8_SRGB,
-                                                    256, 1, 1, false, nullptr);
+                                                    64, 1, 1, false, nullptr);
+
+  auto densitymap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
+                                                    GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                    64, 1, 1, false, nullptr);
 
   auto sampler =
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
@@ -226,6 +239,7 @@ int main(int argc, char *argv[]) {
 
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
+  raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
@@ -240,16 +254,20 @@ int main(int argc, char *argv[]) {
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, particles.size(), nullptr);
   auto aabbBuffer =
-      gprtDeviceBufferCreate<float3>(context, 2 * particles.size(), nullptr);
+      gprtDeviceBufferCreate<float3>(context, (2 * particles.size()) / particlesPerLeaf, nullptr);
   auto particleGeom = gprtGeomCreate<ParticleData>(context, particleType);
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
-                        particles.size() /* just one aabb */);
+                        particles.size() / particlesPerLeaf/* just one aabb */);
 
   ParticleData *particleRecord = gprtGeomGetParameters(particleGeom);
   particleRecord->numParticles = particles.size();
+  particleRecord->particlesPerLeaf = particlesPerLeaf;
   particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
+  particleRecord->colormap = gprtTextureGetHandle(colormap);
+  particleRecord->densitymap = gprtTextureGetHandle(densitymap);
+  particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
@@ -264,19 +282,14 @@ int main(int argc, char *argv[]) {
   // Upload parameters
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
-  // Generate some particles
-  if (particles.size() == 0) {
-    gprtComputeLaunch1D(context, GenParticles, particles.size());
-  }
-  else {
-    gprtBufferMap(particleBuffer);
-    float4* particlePositions = gprtBufferGetPointer(particleBuffer);
-    memcpy(particlePositions, particles.data(), sizeof(float4) * particles.size());
-    gprtBufferUnmap(particleBuffer);
-  }
+  // Upload some particles
+  gprtBufferMap(particleBuffer);
+  float4* particlePositions = gprtBufferGetPointer(particleBuffer);
+  memcpy(particlePositions, particles.data(), sizeof(float4) * particles.size());
+  gprtBufferUnmap(particleBuffer);
 
   // Generate bounding boxes for those particles
-  gprtComputeLaunch1D(context, GenRBFBounds, particles.size());
+  gprtComputeLaunch1D(context, GenRBFBounds, particles.size() / particlesPerLeaf);
 
   // Now we can build the tree
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
@@ -288,24 +301,48 @@ int main(int argc, char *argv[]) {
   raygenData.world = gprtAccelGetHandle(world);
 
   // For now, allocate a grid of voxels for raster mode
-  uint32_t resolution = 256;
   auto voxelVolume = gprtDeviceBufferCreate<float4>(
-      context, resolution * resolution * resolution, nullptr);
+      context, structuredGridResolution * structuredGridResolution * structuredGridResolution, nullptr);
   auto voxelVolumeCount = gprtDeviceBufferCreate<float>(
-      context, resolution * resolution * resolution, nullptr);
+      context, structuredGridResolution * structuredGridResolution * structuredGridResolution, nullptr);
   gprtBufferClear(voxelVolume);
   gprtBufferClear(voxelVolumeCount);
-  uint3 dims = uint3(resolution, resolution, resolution);
+  uint3 dims = uint3(structuredGridResolution, structuredGridResolution, structuredGridResolution);
   raygenData.volume = gprtBufferGetHandle(voxelVolume);
   raygenData.volumeCount = gprtBufferGetHandle(voxelVolumeCount);
   raygenData.volumeDimensions = dims;
+
+  // Grid of voxels for DDA
+  auto minMaxVolume = gprtDeviceBufferCreate<float2>(
+      context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
+  auto majorantVolume = gprtDeviceBufferCreate<float>(
+      context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
+  raygenData.minMaxVolume = gprtBufferGetHandle(minMaxVolume);  
+  raygenData.majorants = gprtBufferGetHandle(majorantVolume);
+  uint3 ddaDimensions = uint3(ddaGridResolution, ddaGridResolution, ddaGridResolution);
+  raygenData.ddaDimensions = ddaDimensions;
 
   // copy raygen params
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
-  ImGG::GradientWidget gradient_widget{};
+  // compute minmax ranges
+  {
+    // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
+    auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+    *params = raygenData;
+    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
+    uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+    // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
+    gprtBufferClear(minMaxVolume);    
+    gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size());
+  }
+
+  ImGG::GradientWidget colormapWidget{};
+  ImGG::GradientWidget densitymapWidget{};
+
+  bool majorantsOutOfDate = true;
   bool voxelized = false;
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
@@ -323,7 +360,7 @@ int main(int argc, char *argv[]) {
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
-    if (gradient_widget.widget("My Gradient") || firstFrame) {
+    if (colormapWidget.widget("Attribute Colormap") || firstFrame) {
       auto make_8bit = [](const float f) -> uint32_t {
         return std::min(255, std::max(0, int(f * 256.f)));
       };
@@ -338,9 +375,9 @@ int main(int argc, char *argv[]) {
 
       gprtTextureMap(colormap);
       uint32_t *ptr = gprtTextureGetPointer(colormap);
-      for (uint32_t i = 0; i < 256; ++i) {
-        auto result = gradient_widget.gradient().at(
-            ImGG::RelativePosition(float(i + 1) / 257.f));
+      for (uint32_t i = 0; i < 64; ++i) {
+        auto result = colormapWidget.gradient().at(
+            ImGG::RelativePosition(float(i + 1) / 65.f));
         ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
       }
       gprtTextureUnmap(colormap);
@@ -348,6 +385,34 @@ int main(int argc, char *argv[]) {
       frameID = 1;
 
       voxelized = false;
+      majorantsOutOfDate = true;
+    }
+
+    if (densitymapWidget.widget("Density Colormap") || firstFrame) {
+      auto make_8bit = [](const float f) -> uint32_t {
+        return std::min(255, std::max(0, int(f * 256.f)));
+      };
+
+      auto make_rgba = [make_8bit](float4 color) -> uint32_t {
+        float gamma = 2.2;
+        color =
+            pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
+        return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) +
+               (make_8bit(color.z) << 16) + (make_8bit(color.w) << 24);
+      };
+
+      gprtTextureMap(densitymap);
+      uint32_t *ptr = gprtTextureGetPointer(densitymap);
+      for (uint32_t i = 0; i < 64; ++i) {
+        auto result = densitymapWidget.gradient().at(
+            ImGG::RelativePosition(float(i + 1) / 65.f));
+        ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
+      }
+      gprtTextureUnmap(densitymap);
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
     }
 
     float speed = .001f;
@@ -476,10 +541,21 @@ int main(int argc, char *argv[]) {
     static float clampMaxCumulativeValue = 1.f;
     static float unit = 0.1f;
     if (ImGui::SliderFloat("clamp max cumulative value",
-                           &clampMaxCumulativeValue, 0.f, 10.f))
+                           &clampMaxCumulativeValue, 0.f, 100.f)) {
       frameID = 1;
+      majorantsOutOfDate = true;
+      voxelized = false;
+    }
     if (ImGui::InputFloat("delta tracking unit value", &unit))
       frameID = 1;
+    
+    static bool visualizeAttributes = true;
+    if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes)) 
+    {
+      frameID = 1;
+      // majorantsOutOfDate = true; // might do this later...
+      voxelized = false;
+    }
 
     unit = std::max(unit, .001f);
     static float azimuth = 0.f;
@@ -493,6 +569,21 @@ int main(int argc, char *argv[]) {
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
       frameID = 1;
     ImGui::EndFrame();
+
+    raygenData.frameID = frameID;
+    raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
+    raygenData.unit = unit;
+    raygenData.visualizeAttributes = visualizeAttributes;
+    raygenData.light.ambient = ambient;
+    raygenData.light.elevation = elevation;
+    raygenData.light.azimuth = azimuth;
+
+    particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
+    particleRecord->visualizeAttributes = visualizeAttributes;
+
+    // copy raygen params
+    *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
+    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     // if we need to, revoxelize
     if (mode == 2 && !voxelized) {
@@ -509,18 +600,18 @@ int main(int argc, char *argv[]) {
       voxelized = true;
     }
 
-    raygenData.frameID = frameID;
-    raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
-    raygenData.unit = unit;
-    raygenData.light.ambient = ambient;
-    raygenData.light.elevation = elevation;
-    raygenData.light.azimuth = azimuth;
+    // if we need to, recompute majorants 
+    if (majorantsOutOfDate) {
 
-    particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
+      gprtBufferClear(majorantVolume);
 
-    // copy raygen params
-    *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
-    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+      auto params = gprtComputeGetParameters<RayGenData>(ComputeMajorantGrid);
+      *params = raygenData;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+      uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+      gprtComputeLaunch1D(context, ComputeMajorantGrid, numVoxels);
+      majorantsOutOfDate = false;
+    }
 
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);

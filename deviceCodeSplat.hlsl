@@ -35,7 +35,7 @@ struct ParticleSample {
 // there are a max of 32 ray payload registers
 #define PARTICLE_BUFFER_SIZE 15
 
-struct SplatPayload {
+struct [raypayload]  SplatPayload {
   uint32_t tail; // end index of the array
   uint32_t pad;
   ParticleSample particles[PARTICLE_BUFFER_SIZE];   // array
@@ -82,9 +82,11 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float particlesPerSlab = PARTICLE_BUFFER_SIZE / 8; // just taking this for now
 
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
+  int visualizeAttributes = record.visualizeAttributes;
 
   float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
   if (tenter < texit) {
@@ -116,12 +118,14 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
         // Integrate depth-sorted list of particles
         for (int i = 0; i < payload.tail; ++i) {
-          float3 P = gprt::load<float4>(record.particles, payload.particles[i].id).xyz;
+          float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P, radius);
-          float4 color_sample = colormap.SampleGrad(colormapSampler, drbf, 0.f, 0.f);
-          float alpha_1msa = color_sample.w * (1.0 - result_color.a);
-          result_color.rgb += alpha_1msa * color_sample.rgb;
+          float drbf = evaluate_rbf(X, P.xyz, radius);
+          if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
+          float4 color_sample = colormap.SampleGrad(colormapSampler, P.w, 0.f, 0.f);
+          float4 density_sample = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f);
+          float alpha_1msa = density_sample.w * (1.0 - result_color.a);
+          result_color.rgb += alpha_1msa * ((visualizeAttributes) ? color_sample.rgb : density_sample.rgb);
           result_color.a += alpha_1msa;
         }
       }
@@ -148,27 +152,35 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 }
 
 GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
-  uint primID = PrimitiveIndex();
-  float3 center = gprt::load<float4>(record.particles, primID).xyz;
-  float radius = record.rbfRadius;
-  float3 origin = WorldRayOrigin();
-  float3 direction = WorldRayDirection();
-  float t = distance(center, origin);
-  float3 sample_pos = origin + t * direction;
-  float3 offset = center - sample_pos;
+  uint clusterID = PrimitiveIndex();
+  uint32_t particlesPerLeaf = record.particlesPerLeaf;
+  uint32_t numParticles = record.numParticles;
+  
+  for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
+    uint32_t primID = clusterID * particlesPerLeaf + i;
+    if (primID >= numParticles) break;
 
-  float tmin = RayTMin();
-  float tmax = RayTCurrent();
+    float3 center = gprt::load<float4>(record.particles, primID).xyz;
+    float radius = record.rbfRadius;
+    float3 origin = WorldRayOrigin();
+    float3 direction = WorldRayDirection();
+    float t = distance(center, origin);
+    float3 sample_pos = origin + t * direction;
+    float3 offset = center - sample_pos;
 
-  uint2 pixelID = DispatchRaysIndex().xy;
-  uint2 centerID = DispatchRaysDimensions().xy / 2;
+    float tmin = RayTMin();
+    float tmax = RayTCurrent();
 
-  if ((dot(offset, offset) < radius * radius) && (tmin <= t) && (t < tmax)) 
-  {
-    ParticleSample attr;
-    attr.t = t;
-    attr.id = primID;
-    ReportHit(t, /*hitKind*/ 0, attr);
+    uint2 pixelID = DispatchRaysIndex().xy;
+    uint2 centerID = DispatchRaysDimensions().xy / 2;
+
+    if ((dot(offset, offset) < radius * radius) && (tmin <= t) && (t < tmax)) 
+    {
+      ParticleSample attr;
+      attr.t = t;
+      attr.id = primID;
+      ReportHit(t, /*hitKind*/ 0, attr);
+    }
   }
 }
 
