@@ -122,9 +122,13 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
           float drbf = evaluate_rbf(X, P.xyz, radius);
           if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
+
+          // Idea: parameterize density by both a denisty map and a colormap.
+          // The denstiy map is parameterized on the RBF density.
+          // The colormap density is parameterized by an attribute.
           float4 color_sample = colormap.SampleGrad(colormapSampler, P.w, 0.f, 0.f);
           float4 density_sample = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f);
-          float alpha_1msa = density_sample.w * (1.0 - result_color.a);
+          float alpha_1msa = ((visualizeAttributes) ? color_sample.w * density_sample.w : density_sample.w) * (1.0 - result_color.a);
           result_color.rgb += alpha_1msa * ((visualizeAttributes) ? color_sample.rgb : density_sample.rgb);
           result_color.a += alpha_1msa;
         }

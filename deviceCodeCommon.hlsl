@@ -70,8 +70,10 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   int3 dims = record.volumeDimensions;
 
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
+  bool visualizeAttributes = record.visualizeAttributes;
 
   // transform particle into voxel space
   aabbMin = (aabbMin - lb) / (rt - lb);
@@ -106,10 +108,13 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
 
         if (distance(pt, particle.xyz) >= radius) continue;
 
-        float density = evaluate_rbf(pt, particle.xyz, radius);
+        float rbf = evaluate_rbf(pt, particle.xyz, radius);
         // float u = density;
         // if (clampMaxCumulativeValue > 0.f) u /= clampMaxCumulativeValue;
-        float4 xf = colormap.SampleGrad(sampler, particle.w, 0.f, 0.f);
+        float4 cxf = colormap.SampleGrad(sampler, particle.w, 0.f, 0.f);
+        float4 dxf = densitymap.SampleGrad(sampler, rbf, 0.f, 0.f);
+        float3 color = (visualizeAttributes) ? cxf.rgb : dxf.rgb;
+        float density = (visualizeAttributes) ? cxf.w * dxf.w : dxf.w;
 
         
         // if (primID == 0) {
@@ -117,10 +122,10 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
         // }
         // gprt::store<float4>(record.volume, addr, xf);
 
-        gprt::atomicAdd32f(record.volume, addr * 4 + 0, xf.r);
-        gprt::atomicAdd32f(record.volume, addr * 4 + 1, xf.g);
-        gprt::atomicAdd32f(record.volume, addr * 4 + 2, xf.b);
-        gprt::atomicAdd32f(record.volume, addr * 4 + 3, xf.w);
+        gprt::atomicAdd32f(record.volume, addr * 4 + 0, color.r);
+        gprt::atomicAdd32f(record.volume, addr * 4 + 1, color.g);
+        gprt::atomicAdd32f(record.volume, addr * 4 + 2, color.b);
+        gprt::atomicAdd32f(record.volume, addr * 4 + 3, density);
         gprt::atomicAdd32f(record.volumeCount, addr, 1.f);
       }
     }
@@ -148,8 +153,10 @@ GPRT_COMPUTE_PROGRAM(AverageRBFBounds, (RayGenData, record), (1,1,1)) {
 }
 
 GPRT_COMPUTE_PROGRAM(ClearMinMaxGrid, (RayGenData, record), (1,1,1)) {
-  // int voxelID = DispatchThreadID.x;
-  // gprt::store<float2>(record.minMaxVolume, voxelID, float2(1e20f, 0.f));
+  int voxelID = DispatchThreadID.x;
+  // clearing rbf density range to 0,0, since this will ultimately be a sum.
+  // clearing attribute density to inf, 0 since there we're taking min/max
+  gprt::store<float4>(record.minMaxVolume, voxelID, float4(0.f, 0.f, 1e20f, 0.f));
 
   // if (voxelID == 0) printf("TEST\n");
 }
@@ -167,8 +174,6 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
   float3 lb = record.globalAABBMin;
   int3 dims = record.ddaDimensions;
 
-  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
   // transform particle into voxel space
@@ -230,12 +235,12 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
         else minDensity = evaluate_rbf(mxd, radius);
 
         // Keep track of the atomic sum of these two
-        gprt::atomicAdd32f(record.minMaxVolume, addr * 2 + 0, minDensity);
-        gprt::atomicAdd32f(record.minMaxVolume, addr * 2 + 1, maxDensity);
+        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 0, minDensity);
+        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 1, maxDensity);
 
-        // if (primID == 0) {
-        //   printf("Splatting mndist %f mxdist %f min %f max %f\n", mnd, mxd, minDensity, maxDensity );
-        // }
+        // Keep track of the atomic min/max of these two
+        gprt::atomicMin32f(record.minMaxVolume, addr * 4 + 2, particle.w);
+        gprt::atomicMax32f(record.minMaxVolume, addr * 4 + 3, particle.w);
       }
     }
   }
@@ -243,31 +248,45 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
 
 GPRT_COMPUTE_PROGRAM(ComputeMajorantGrid, (RayGenData, record), (1,1,1)) {
   uint voxelID = DispatchThreadID.x;
-  float2 minmax = gprt::load<float2>(record.minMaxVolume, voxelID);
-  // minmax.y = min(minmax.y, record.clampMaxCumulativeValue);
-  // minmax.x = min(minmax.y, minmax.x);
+  float4 minmax = gprt::load<float4>(record.minMaxVolume, voxelID);
 
   if (record.clampMaxCumulativeValue > 0.f)
-    minmax = min(minmax, float2(record.clampMaxCumulativeValue, record.clampMaxCumulativeValue));
+    // note, using xy here and leaving zw alone
+    minmax.xy = minmax.xy / record.clampMaxCumulativeValue;
   
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   uint32_t colormapWidth;
   colormap.GetDimensions(colormapWidth);
+  uint32_t densitymapWidth;
+  densitymap.GetDimensions(densitymapWidth);
 
   // if (voxelID < 20) printf("min %f max %f\n", minmax.x, minmax.y);
 
-  // transform data min max to colormap space
-  uint32_t start = uint32_t(clamp(minmax.x, 0.f, 1.f) * (colormapWidth - 1));
-  uint32_t stop  = uint32_t(clamp(minmax.y, 0.f, 1.f) * (colormapWidth - 1));
-
   // if (voxelID < 20) printf("start %u stop %u\n", start, stop);
 
-  float majorant = 0.f;
+  // transform data min max to colormap space
+  float densityMajorant = 0.f;
+
+  uint32_t start = uint32_t(clamp(minmax.x, 0.f, 1.f) * (densitymapWidth - 1));
+  uint32_t stop  = uint32_t(clamp(minmax.y, 0.f, 1.f) * (densitymapWidth - 1));
   for (uint32_t i = start; i <= stop; ++i) {
-    majorant = max(majorant, colormap[i].w);
+    densityMajorant = max(densityMajorant, densitymap[i].w);
+  }
+
+  // note, using "z" and "w", which store attribute range
+  start = uint32_t(clamp(minmax.z, 0.f, 1.f) * (colormapWidth - 1));
+  stop  = uint32_t(clamp(minmax.w, 0.f, 1.f) * (colormapWidth - 1));
+  float attributeMajorant;
+  for (uint32_t i = start; i <= stop; ++i) {
+    attributeMajorant = max(attributeMajorant, colormap[i].w);
+  }
+
+  float majorant = densityMajorant;
+  if (record.visualizeAttributes) {
+    majorant *= attributeMajorant;
   }
   
-  // if (voxelID < 20) printf("storing %f to %lu\n", majorant, record.majorants.x);
   gprt::store<float>(record.majorants, voxelID, majorant);
 }
 

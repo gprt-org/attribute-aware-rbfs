@@ -33,7 +33,7 @@ struct RBFAttribute {
 struct [raypayload] RBFPayload {
   uint32_t count;
   float density;
-  float3 rgb;
+  float4 color;
 };
 
 class ParticleTracker {
@@ -100,7 +100,7 @@ class ParticleTracker {
       RBFPayload payload; 
       payload.count = 0;
       payload.density = 0.f;       
-      payload.rgb = float3(0.f, 0.f, 0.f);
+      payload.color = float4(0.f, 0.f, 0.f, 0.f);
       TraceRay(accel,                  // the tree
               RAY_FLAG_NONE,           // ray flags
               0xff,                    // instance inclusion mask
@@ -111,17 +111,21 @@ class ParticleTracker {
               payload                  // the payload IO
       );
       if (payload.count > 0) {
-        payload.rgb /= float(payload.count);
-        payload.rgb = pow(payload.rgb, 1.f / 2.f);
+        payload.color /= float(payload.count);
+        payload.color.rgb = pow(payload.color.rgb, 1.f / 2.f); // note, only square rooting rbg
       }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
-      float4 xf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+      float4 densityxf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+      float density = densityxf.w;
 
-      if (lcg_randomf(rng) < xf.w / (majorant)) {
+      // allows colormap to hide attributes independent of RBF density
+      if (visualizeAttributes) density *= payload.color.w;
+
+      if (lcg_randomf(rng) < density / (majorant)) {
         if (visualizeAttributes)
-          albedo = float4(payload.rgb, 1.f);
+          albedo = float4(payload.color.rgb, 1.f);
         else
-          albedo = float4(xf.rgb, 1.f);
+          albedo = float4(densityxf.rgb, 1.f);
         return false; // terminate traversal
       }
     }
@@ -407,9 +411,10 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   
   SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-  float3 rgb = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f).rgb;
+  float4 color = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f);
 
-  payload.rgb += pow(rgb, 2.f);
+  payload.color.rgb += pow(color.rgb, 2.f);
+  payload.color.a += color.a;
   
   if (record.clampMaxCumulativeValue > 0.f) {
     payload.density = min(payload.density, record.clampMaxCumulativeValue);

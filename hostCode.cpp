@@ -70,7 +70,7 @@ float rbfRadius = .5f; //3.f;
 std::vector<float4> particles;
 
 uint32_t structuredGridResolution = 256;
-uint32_t ddaGridResolution = 256;
+uint32_t ddaGridResolution = 512;
 
 #include <iostream>
 int main(int argc, char *argv[]) { 
@@ -300,7 +300,9 @@ int main(int argc, char *argv[]) {
   raygenData.volumeDimensions = dims;
 
   // Grid of voxels for DDA
-  auto minMaxVolume = gprtDeviceBufferCreate<float2>(
+  // minmax volume stores both min and max of RBF as well as min and max of 
+  // attributes
+  auto minMaxVolume = gprtDeviceBufferCreate<float4>(
       context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
   auto majorantVolume = gprtDeviceBufferCreate<float>(
       context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
