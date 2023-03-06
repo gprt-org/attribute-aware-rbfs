@@ -66,7 +66,7 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 uint32_t particlesPerLeaf = 8;
-float rbfRadius = .1f; //3.f;
+float rbfRadius = .5f; //3.f;
 std::vector<float4> particles;
 
 uint32_t structuredGridResolution = 256;
@@ -278,9 +278,11 @@ int main(int argc, char *argv[]) {
 
   // Now we can build the tree
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
-  gprtAccelBuild(context, particleAccel);
+  gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, true, true);
+  //, /* compact tree */ true, /* minimize memory */ true);
+  gprtAccelCompact(context, particleAccel); // not sure why, but this causes things to crash...
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Assign tree to raygen parameters
   raygenData.world = gprtAccelGetHandle(world);
@@ -313,6 +315,7 @@ int main(int argc, char *argv[]) {
 
   // compute minmax ranges
   {
+    std::cout<<"Computing minmax ranges"<<std::endl;
     // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
     auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
     *params = raygenData;
@@ -322,6 +325,7 @@ int main(int argc, char *argv[]) {
     // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
     gprtBufferClear(minMaxVolume);    
     gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size());
+    std::cout<<"- Done!"<<std::endl;
   }
 
   ImGG::GradientWidget colormapWidget{};
