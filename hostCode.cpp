@@ -293,9 +293,9 @@ int main(int argc, char *argv[]) {
 
   // Now we can build the tree
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
-  gprtAccelBuild(context, particleAccel);
+  gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
-  gprtAccelBuild(context, world);
+  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
   // Assign tree to raygen parameters
   raygenData.world = gprtAccelGetHandle(world);
