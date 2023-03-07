@@ -13,6 +13,12 @@ if (${BUILD_ARBORX})
 add_subdirectory(3rdParty/ArborX)
 endif()
 
+option(BUILD_MMPLD "Build MMPLD Library for University of Stuttgart Data" ON)
+if (${BUILD_MMPLD})
+add_library(mmpld INTERFACE)
+target_include_directories(mmpld INTERFACE ${CMAKE_CURRENT_LIST_DIR}/3rdParty/mmpld_io/include/)
+endif()
+
 embed_devicecode(
   OUTPUT_TARGET
     deviceCodeCommon
@@ -57,6 +63,11 @@ add_executable(viewer hostCode.cpp)
 if (${BUILD_ARBORX})
 set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
 set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DARBORX)
+endif()
+
+if (${BUILD_MMPLD})
+set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DMMPLD)
+set(LIBRARIES ${LIBRARIES} mmpld)
 endif()
 
 find_package(TBB)

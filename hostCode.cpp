@@ -34,7 +34,8 @@
 
 #include <fstream>
 
-#include "importers/arborx.h"
+#include "importers/import_arborx.h"
+#include "importers/import_mmpld.h"
 #include <argparse/argparse.hpp>
 
 // For parallel sorting of points along a hilbert curve
@@ -70,7 +71,7 @@ float rbfRadius = .5f; //3.f;
 std::vector<float4> particles;
 
 uint32_t structuredGridResolution = 256;
-uint32_t ddaGridResolution = 512;
+uint32_t ddaGridResolution = 256;
 
 #include <iostream>
 int main(int argc, char *argv[]) { 
@@ -78,6 +79,9 @@ int main(int argc, char *argv[]) {
 
   program.add_argument("--dbscan")
     .help("A path to a DBScan dataset (ending in .arborx)")
+    .default_value("");
+  program.add_argument("--mmpld")
+    .help("A path to a MMPLD dataset (ending in .mmpld)")
     .default_value("");
 
   try {
@@ -92,7 +96,9 @@ int main(int argc, char *argv[]) {
   std::vector<std::pair<uint64_t, float4>> particleData;
 
   std::string dbscanPath = program.get<std::string>("--dbscan");
+  std::string mmpldPath = program.get<std::string>("--mmpld");
   if (dbscanPath != "") importArborX(dbscanPath, particleData);
+  else if (mmpldPath != "") importMMPLD(mmpldPath, particleData);
 
   else {
     particleData.resize(10000);
