@@ -13,3 +13,6 @@
 [submodule "3rdParty/mmpld_io"]
 	path = 3rdParty/mmpld_io
 	url = git@github.com:UniStuttgart-VISUS/mmpld_io.git
+[submodule "3rdParty/genericio"]
+	path = 3rdParty/genericio
+	url = https://git.cels.anl.gov/hacc/genericio.git

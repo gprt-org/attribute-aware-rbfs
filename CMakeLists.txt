@@ -19,6 +19,11 @@ add_library(mmpld INTERFACE)
 target_include_directories(mmpld INTERFACE ${CMAKE_CURRENT_LIST_DIR}/3rdParty/mmpld_io/include/)
 endif()
 
+option(BUILD_GENERICIO "Build GENERICIO Library for HACC" ON)
+if (${BUILD_GENERICIO})
+add_subdirectory(3rdParty/genericio)
+endif()
+
 embed_devicecode(
   OUTPUT_TARGET
     deviceCodeCommon
@@ -68,6 +73,11 @@ endif()
 if (${BUILD_MMPLD})
 set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DMMPLD)
 set(LIBRARIES ${LIBRARIES} mmpld)
+endif()
+
+if (${BUILD_GENERICIO})
+set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DGENERICIO)
+set(LIBRARIES ${LIBRARIES} genericio)
 endif()
 
 find_package(TBB)
