@@ -366,7 +366,7 @@ int main(int argc, char *argv[])
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
 
-    static int particleFrame = 500;
+    static int particleFrame = 0;
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
     if (previousParticleFrame != particleFrame) {    
