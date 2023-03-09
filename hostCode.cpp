@@ -58,7 +58,7 @@ extern GPRTProgram deviceCodeRBF;
 extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
-const int2 fbSize = {1000, 1000};
+const int2 fbSize = {1334, 574};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -66,14 +66,15 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-uint32_t particlesPerLeaf = 4;
+// uint32_t particlesPerLeaf = 4;
+uint32_t particlesPerLeaf = 8;
 // float rbfRadius = .01f; //3.f;
 float rbfRadius = 3.f; // 3.f;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
 uint32_t structuredGridResolution = 256;
-uint32_t ddaGridResolution = 64;
+uint32_t ddaGridResolution = 128;
 
 #include <iostream>
 int main(int argc, char *argv[])
@@ -363,7 +364,7 @@ int main(int argc, char *argv[])
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.01f * diagonal;
+  float previousParticleRadius = 0.005f * diagonal;
   do
   {
     ImGuiIO &io = ImGui::GetIO();
@@ -419,7 +420,7 @@ int main(int argc, char *argv[])
 
 
     static float rbfRadius = previousParticleRadius;
-    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.01f, .00001f * diagonal, .1f * diagonal);
+    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.01f, .0001f * diagonal, .1f * diagonal);
 
     if (previousParticleRadius != rbfRadius) {
       particleRecord->rbfRadius = rbfRadius;
@@ -470,7 +471,9 @@ int main(int argc, char *argv[])
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
 
-    static int mode = 0;
+    bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
+
+    static int mode = 1;
     if (ImGui::RadioButton("Splatting", &mode, 0))
       frameID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
@@ -560,6 +563,9 @@ int main(int argc, char *argv[])
 
     int w_state = gprtGetKey(context, GPRT_KEY_W);
     int c_state = gprtGetKey(context, GPRT_KEY_C);
+    int x_state = gprtGetKey(context, GPRT_KEY_X);
+    int y_state = gprtGetKey(context, GPRT_KEY_Y);
+    int z_state = gprtGetKey(context, GPRT_KEY_Z);
     int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
 
     // close window on Ctrl-W press
@@ -573,8 +579,21 @@ int main(int argc, char *argv[])
       break;
     }
 
+
+    if (x_state) {
+      lookUp = float3(1.f, 0.f, 0.f);
+    }
+
+    if (y_state) {
+      lookUp = float3(0.f, 1.f, 0.f);
+    }
+
+    if (z_state) {
+      lookUp = float3(0.f, 0.f, 1.f);
+    }
+
     // If we click the mouse, we should rotate the camera
-    if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame)
+    if (state == GPRT_PRESS && !io.WantCaptureMouse || x_state || y_state || z_state || fovChanged || firstFrame)
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -676,7 +695,7 @@ int main(int argc, char *argv[])
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius;
     if (ImGui::DragFloat("clamp max cumulative value",
-                           &clampMaxCumulativeValue, 1.f, 0.f, 1000.f))
+                           &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
     {
       frameID = 1;
       majorantsOutOfDate = true;

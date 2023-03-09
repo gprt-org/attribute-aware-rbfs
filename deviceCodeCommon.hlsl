@@ -197,7 +197,7 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
       attributeMin = attributeMax = particle.w;
     } else {
       aabbMin = min(aabbMin, particle.xyz - float3(radius, radius, radius));
-      aabbMax = max(aabbMax, particle.xyz - float3(radius, radius, radius));
+      aabbMax = max(aabbMax, particle.xyz + float3(radius, radius, radius));
       attributeMin = min(attributeMin, particle.w);
       attributeMax = max(attributeMin, particle.w);
     }
