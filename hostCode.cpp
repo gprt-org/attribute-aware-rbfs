@@ -360,7 +360,10 @@ int main(int argc, char *argv[])
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
 
+  float diagonal = length(aabb[1] - aabb[0]);
+
   int previousParticleFrame = -1;
+  float previousParticleRadius = 0.01f * diagonal;
   do
   {
     ImGuiIO &io = ImGui::GetIO();
@@ -370,10 +373,11 @@ int main(int argc, char *argv[])
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
     if (previousParticleFrame != particleFrame) {    
-
       std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord->numParticles = particles[particleFrame].size();
+      particleRecord->rbfRadius = previousParticleRadius;
       raygenData.numParticles = particles[particleFrame].size();
+      raygenData.rbfRadius = previousParticleRadius;
 
       // Upload some particles
       gprtBufferMap(particleBuffer);
@@ -389,9 +393,45 @@ int main(int argc, char *argv[])
       gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
 
       // Now we can build the tree
-      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, true, true);
-      //, /* compact tree */ true, /* minimize memory */ true);
-      gprtAccelCompact(context, particleAccel); // not sure why, but this causes things to crash...
+      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+      // Assign tree to raygen parameters
+      raygenData.world = gprtAccelGetHandle(world);
+
+      // compute minmax ranges
+      {
+        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        *params = raygenData;
+        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        gprtBufferClear(minMaxVolume);
+        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        std::cout << "- Done!" << std::endl;
+      }
+      
+      voxelized = false;
+      majorantsOutOfDate = true;
+      frameID = 1;
+      previousParticleFrame = particleFrame;
+    }
+
+
+    static float rbfRadius = previousParticleRadius;
+    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.01f, .00001f * diagonal, .1f * diagonal);
+
+    if (previousParticleRadius != rbfRadius) {
+      particleRecord->rbfRadius = rbfRadius;
+      raygenData.rbfRadius = rbfRadius;
+      *genRBFBoundsData = *particleRecord;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+      // Regenerate bounding boxes for new radius
+      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
+
+      // Now we can refit the tree
+      gprtAccelUpdate(context, particleAccel);
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
       // Assign tree to raygen parameters
@@ -415,9 +455,8 @@ int main(int argc, char *argv[])
       voxelized = false;
       majorantsOutOfDate = true;
       frameID = 1;
-      previousParticleFrame = particleFrame;
+      previousParticleRadius = rbfRadius;
     }
-
 
     if (ImGui::Button("Save screenshot"))
     {
@@ -426,8 +465,8 @@ int main(int argc, char *argv[])
 
     static float exposure = 1.f;
     static float gamma = 1.0f;
-    ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 2.f);
-    ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 4.f);
+    ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
+    ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
 
@@ -635,9 +674,9 @@ int main(int argc, char *argv[])
     }
 
     static float clampMaxCumulativeValue = 1.f;
-    static float unit = 0.1f;
-    if (ImGui::SliderFloat("clamp max cumulative value",
-                           &clampMaxCumulativeValue, 0.f, 100.f))
+    static float unit = previousParticleRadius;
+    if (ImGui::DragFloat("clamp max cumulative value",
+                           &clampMaxCumulativeValue, 1.f, 0.f, 1000.f))
     {
       frameID = 1;
       majorantsOutOfDate = true;
