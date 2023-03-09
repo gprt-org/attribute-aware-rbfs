@@ -43,13 +43,13 @@
 #include <algorithm>
 #include "hilbert.h"
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG(message)                                           \
+  std::cout << GPRT_TERMINAL_BLUE;                             \
+  std::cout << "#gprt.sample(main): " << message << std::endl; \
   std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
+#define LOG_OK(message)                                        \
+  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                       \
+  std::cout << "#gprt.sample(main): " << message << std::endl; \
   std::cout << GPRT_TERMINAL_DEFAULT;
 
 extern GPRTProgram deviceCodeCommon;
@@ -68,46 +68,55 @@ float cosFovy = 0.66f;
 
 uint32_t particlesPerLeaf = 4;
 // float rbfRadius = .01f; //3.f;
-float rbfRadius = 3.f; //3.f;
-std::vector<float4> particles;
+float rbfRadius = 3.f; // 3.f;
+std::vector<std::vector<float4>> particles;
+size_t maxNumParticles;
 
 uint32_t structuredGridResolution = 256;
-uint32_t ddaGridResolution = 256;
+uint32_t ddaGridResolution = 64;
 
 #include <iostream>
-int main(int argc, char *argv[]) { 
+int main(int argc, char *argv[])
+{
   argparse::ArgumentParser program("RT Point Clouds");
 
   program.add_argument("--dbscan")
-    .help("A path to a DBScan dataset (ending in .arborx)")
-    .default_value("");
+      .help("A path to a DBScan dataset (ending in .arborx)")
+      .default_value("");
   program.add_argument("--mmpld")
-    .help("A path to a MMPLD dataset (ending in .mmpld)")
-    .default_value("");
+      .help("A path to a MMPLD dataset (ending in .mmpld)")
+      .default_value("");
 
-  try {
+  try
+  {
     program.parse_args(argc, argv);
   }
-  catch (const std::runtime_error& err) {
+  catch (const std::runtime_error &err)
+  {
     std::cerr << err.what() << std::endl;
     std::cerr << program;
     std::exit(1);
   }
 
-  std::vector<std::pair<uint64_t, float4>> particleData;
+  std::vector<std::vector<std::pair<uint64_t, float4>>> particleData;
 
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
-  if (dbscanPath != "") importArborX(dbscanPath, particleData);
-  else if (mmpldPath != "") importMMPLD(mmpldPath, particleData);
+  if (dbscanPath != "")
+    importArborX(dbscanPath, particleData);
+  else if (mmpldPath != "")
+    importMMPLD(mmpldPath, particleData);
 
-  else {
-    particleData.resize(10000);
-    for (uint32_t i = 0; i < particleData.size(); ++i) {
-      float t = float(i) / float(particleData.size());
-      particleData[i].second = float4(100.f * t * sin(t * 256.f * 3.14f),  
-                                      100.f * t * cos(t * 256.f * 3.14f), 
-                                      0.f, t);
+  else
+  {
+    particleData.resize(1);
+    particleData[0].resize(10000);
+    for (uint32_t i = 0; i < particleData[0].size(); ++i)
+    {
+      float t = float(i) / float(particleData[0].size());
+      particleData[0][i].second = float4(100.f * t * sin(t * 256.f * 3.14f),
+                                         100.f * t * cos(t * 256.f * 3.14f),
+                                         0.f, t);
     }
   }
 
@@ -118,40 +127,69 @@ int main(int argc, char *argv[]) {
        -std::numeric_limits<float>::max()},
   };
 
-  std::cout<<"Computing bounding box..."<<std::endl;
-
-  for (size_t i = 0; i < particleData.size(); ++i) {    
-    aabb[0] = linalg::min(aabb[0], particleData[i].second.xyz() - rbfRadius);
-    aabb[1] = linalg::max(aabb[1], particleData[i].second.xyz() + rbfRadius);
+  std::cout << "Computing bounding box..." << std::endl;
+  for (size_t j = 0; j < particleData.size(); ++j)
+  {
+    for (size_t i = 0; i < particleData[j].size(); ++i)
+    {
+      aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz() - rbfRadius);
+      aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz() + rbfRadius);
+    }
   }
-  std::cout<<" - Done!"<<std::endl;
+  std::cout << " - Done!" << std::endl;
 
   // set focus to aabb
   lookAt = (aabb[1] + aabb[0]) * .5f;
-  
-  // Now, we compute hilbert codes per-point
-  std::cout<<"Computing hilbert codes..."<<std::endl;
-  std::for_each(std::execution::par_unseq, std::begin(particleData), 
-    std::end(particleData), [&](auto &&i) 
-  {
-    float3 tmp = (i.second.xyz() - aabb[0]) / (aabb[1] - aabb[0]);
-    tmp.x = tmp.x * (float)(1 << 16);
-    tmp.y = tmp.y * (float)(1 << 16);
-    tmp.z = tmp.z * (float)(1 << 16);
-    const bitmask_t coord[3] = {bitmask_t(tmp.x), bitmask_t(tmp.y), bitmask_t(tmp.z)};
-    i.first = hilbert_c2i(3, 16, coord);
-  });
-  
-  std::cout<<" - Done!"<<std::endl;
 
-  std::cout<<"Sorting points along hilbert curve..."<<std::endl;  
-  std::sort(std::execution::par_unseq, particleData.begin(), particleData.end());
-  std::cout<<" - Done!"<<std::endl;
+  // Now, we compute hilbert codes per-point
+  std::cout << "Computing hilbert codes..." << std::endl;
+  for (size_t j = 0; j < particleData.size(); ++j)
+  {
+    std::for_each(std::execution::par_unseq, std::begin(particleData[j]),
+                  std::end(particleData[j]), [&](auto &&i)
+                  {
+      float3 tmp = (i.second.xyz() - aabb[0]) / (aabb[1] - aabb[0]);
+      tmp.x = tmp.x * (float)(1 << 16);
+      tmp.y = tmp.y * (float)(1 << 16);
+      tmp.z = tmp.z * (float)(1 << 16);
+      const bitmask_t coord[3] = {bitmask_t(tmp.x), bitmask_t(tmp.y), bitmask_t(tmp.z)};
+      i.first = hilbert_c2i(3, 16, coord); });
+  }
+  std::cout << " - Done!" << std::endl;
+
+  std::cout << "Sorting points along hilbert curve..." << std::endl;
+  for (size_t j = 0; j < particleData.size(); ++j)
+  {
+    std::sort(std::execution::par_unseq, particleData[j].begin(), particleData[j].end());
+  }
+  std::cout << " - Done!" << std::endl;
 
   // here just transferring to a vector we can actually use.
+  maxNumParticles = 0;
+
+  float minScalarValue = +1e20f;
+  float maxScalarValue = -1e20f;
+
   particles.resize(particleData.size());
-  for (size_t i = 0; i < particles.size(); ++i) particles[i] = particleData[i].second;
-  particleData.clear();
+  for (size_t j = 0; j < particleData.size(); ++j) {
+    particles[j].resize(particleData[j].size());
+    for (size_t i = 0; i < particles[j].size(); ++i){
+      particles[j][i] = particleData[j][i].second;
+      minScalarValue = std::min(particles[j][i].w, minScalarValue);
+      maxScalarValue = std::max(particles[j][i].w, maxScalarValue);
+    }
+    particleData[j].clear();
+    maxNumParticles = std::max(maxNumParticles, particles[j].size());
+  }
+
+  // normalize attributes
+  if (maxScalarValue > minScalarValue) {
+    for (size_t j = 0; j < particles.size(); ++j) {
+      for (size_t i = 0; i < particles[j].size(); ++i){
+        particles[j][i].w = (particles[j][i].w - minScalarValue) / (maxScalarValue - minScalarValue);
+      }
+    }
+  }
 
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
   gprtRequestRayTypeCount(2);
@@ -220,8 +258,8 @@ int main(int argc, char *argv[]) {
                                                     64, 1, 1, false, nullptr);
 
   auto densitymap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
-                                                    GPRT_FORMAT_R8G8B8A8_SRGB,
-                                                    64, 1, 1, false, nullptr);
+                                                      GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                      64, 1, 1, false, nullptr);
 
   auto sampler =
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
@@ -249,15 +287,15 @@ int main(int argc, char *argv[]) {
   missData->color1 = float3(0.0f, 0.0f, 0.0f);
 
   auto particleBuffer =
-      gprtDeviceBufferCreate<float4>(context, particles.size(), nullptr);
+      gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
   auto aabbBuffer =
-      gprtDeviceBufferCreate<float3>(context, (2 * particles.size()) / particlesPerLeaf, nullptr);
+      gprtDeviceBufferCreate<float3>(context,2 * ((maxNumParticles + particlesPerLeaf - 1) / particlesPerLeaf), nullptr);
   auto particleGeom = gprtGeomCreate<ParticleData>(context, particleType);
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
-                        particles.size() / particlesPerLeaf/* just one aabb */);
+                        ((maxNumParticles + particlesPerLeaf - 1) / particlesPerLeaf) /* just one aabb */);
 
   ParticleData *particleRecord = gprtGeomGetParameters(particleGeom);
-  particleRecord->numParticles = particles.size();
+  // particleRecord->numParticles = particles[0].size();
   particleRecord->particlesPerLeaf = particlesPerLeaf;
   particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
@@ -268,7 +306,7 @@ int main(int argc, char *argv[]) {
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
-  raygenData.numParticles = particles.size();
+  // raygenData.numParticles = particles[0].size();
   raygenData.particlesPerLeaf = particlesPerLeaf;
 
   // same parameters go to these compute programs too
@@ -280,26 +318,6 @@ int main(int argc, char *argv[]) {
 
   // Upload parameters
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-  // Upload some particles
-  gprtBufferMap(particleBuffer);
-  float4* particlePositions = gprtBufferGetPointer(particleBuffer);
-  memcpy(particlePositions, particles.data(), sizeof(float4) * particles.size());
-  gprtBufferUnmap(particleBuffer);
-
-  // Generate bounding boxes for those particles
-  gprtComputeLaunch1D(context, GenRBFBounds, particles.size() / particlesPerLeaf);
-
-  // Now we can build the tree
-  GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
-  gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, true, true);
-  //, /* compact tree */ true, /* minimize memory */ true);
-  gprtAccelCompact(context, particleAccel); // not sure why, but this causes things to crash...
-  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
-  gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
-  // Assign tree to raygen parameters
-  raygenData.world = gprtAccelGetHandle(world);
 
   // For now, allocate a grid of voxels for raster mode
   auto voxelVolume = gprtDeviceBufferCreate<float4>(
@@ -314,13 +332,13 @@ int main(int argc, char *argv[]) {
   raygenData.volumeDimensions = dims;
 
   // Grid of voxels for DDA
-  // minmax volume stores both min and max of RBF as well as min and max of 
+  // minmax volume stores both min and max of RBF as well as min and max of
   // attributes
   auto minMaxVolume = gprtDeviceBufferCreate<float4>(
       context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
   auto majorantVolume = gprtDeviceBufferCreate<float>(
       context, ddaGridResolution * ddaGridResolution * ddaGridResolution, nullptr);
-  raygenData.minMaxVolume = gprtBufferGetHandle(minMaxVolume);  
+  raygenData.minMaxVolume = gprtBufferGetHandle(minMaxVolume);
   raygenData.majorants = gprtBufferGetHandle(majorantVolume);
   uint3 ddaDimensions = uint3(ddaGridResolution, ddaGridResolution, ddaGridResolution);
   raygenData.ddaDimensions = ddaDimensions;
@@ -328,21 +346,6 @@ int main(int argc, char *argv[]) {
   // copy raygen params
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
-
-  // compute minmax ranges
-  {
-    std::cout<<"Computing minmax ranges"<<std::endl;
-    // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
-    auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
-    *params = raygenData;
-    gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-    uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-    // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
-    gprtBufferClear(minMaxVolume);    
-    gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size() / particlesPerLeaf);
-    std::cout<<"- Done!"<<std::endl;
-  }
 
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget densitymapWidget{};
@@ -353,9 +356,68 @@ int main(int argc, char *argv[]) {
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
   uint32_t frameID = 1;
-  do {
+
+  GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
+  GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
+
+  int previousParticleFrame = -1;
+  do
+  {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
+
+    static int particleFrame = 500;
+    ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
+
+    if (previousParticleFrame != particleFrame) {    
+
+      std::cout<<"Num particles "<< particles[particleFrame].size();
+      particleRecord->numParticles = particles[particleFrame].size();
+      raygenData.numParticles = particles[particleFrame].size();
+
+      // Upload some particles
+      gprtBufferMap(particleBuffer);
+      float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
+      memcpy(particlePositions, particles[particleFrame].data(), sizeof(float4) * particles[particleFrame].size());
+      gprtBufferUnmap(particleBuffer);
+
+      *genRBFBoundsData = *particleRecord;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+      // Generate bounding boxes for those particles
+      // note, unneeded boxes will be inactivated.
+      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
+
+      // Now we can build the tree
+      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, true, true);
+      //, /* compact tree */ true, /* minimize memory */ true);
+      gprtAccelCompact(context, particleAccel); // not sure why, but this causes things to crash...
+      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+      // Assign tree to raygen parameters
+      raygenData.world = gprtAccelGetHandle(world);
+
+      // compute minmax ranges
+      {
+        std::cout << "Computing minmax ranges" << std::endl;
+        // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
+        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        *params = raygenData;
+        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
+        gprtBufferClear(minMaxVolume);
+        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        std::cout << "- Done!" << std::endl;
+      }
+      
+      voxelized = false;
+      majorantsOutOfDate = true;
+      frameID = 1;
+      previousParticleFrame = particleFrame;
+    }
+
 
     if (ImGui::Button("Save screenshot"))
     {
@@ -377,12 +439,15 @@ int main(int argc, char *argv[]) {
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
-    if (colormapWidget.widget("Attribute Colormap") || firstFrame) {
-      auto make_8bit = [](const float f) -> uint32_t {
+    if (colormapWidget.widget("Attribute Colormap") || firstFrame)
+    {
+      auto make_8bit = [](const float f) -> uint32_t
+      {
         return std::min(255, std::max(0, int(f * 256.f)));
       };
 
-      auto make_rgba = [make_8bit](float4 color) -> uint32_t {
+      auto make_rgba = [make_8bit](float4 color) -> uint32_t
+      {
         float gamma = 2.2;
         color =
             pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
@@ -392,7 +457,8 @@ int main(int argc, char *argv[]) {
 
       gprtTextureMap(colormap);
       uint32_t *ptr = gprtTextureGetPointer(colormap);
-      for (uint32_t i = 0; i < 64; ++i) {
+      for (uint32_t i = 0; i < 64; ++i)
+      {
         auto result = colormapWidget.gradient().at(
             ImGG::RelativePosition(float(i + 1) / 65.f));
         ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
@@ -405,12 +471,15 @@ int main(int argc, char *argv[]) {
       majorantsOutOfDate = true;
     }
 
-    if (densitymapWidget.widget("Density Colormap") || firstFrame) {
-      auto make_8bit = [](const float f) -> uint32_t {
+    if (densitymapWidget.widget("Density Colormap") || firstFrame)
+    {
+      auto make_8bit = [](const float f) -> uint32_t
+      {
         return std::min(255, std::max(0, int(f * 256.f)));
       };
 
-      auto make_rgba = [make_8bit](float4 color) -> uint32_t {
+      auto make_rgba = [make_8bit](float4 color) -> uint32_t
+      {
         float gamma = 2.2;
         color =
             pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
@@ -420,7 +489,8 @@ int main(int argc, char *argv[]) {
 
       gprtTextureMap(densitymap);
       uint32_t *ptr = gprtTextureGetPointer(densitymap);
-      for (uint32_t i = 0; i < 64; ++i) {
+      for (uint32_t i = 0; i < 64; ++i)
+      {
         auto result = densitymapWidget.gradient().at(
             ImGG::RelativePosition(float(i + 1) / 65.f));
         ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
@@ -436,7 +506,8 @@ int main(int argc, char *argv[]) {
     lastxpos = xpos;
     lastypos = ypos;
     gprtGetCursorPos(context, &xpos, &ypos);
-    if (firstFrame) {
+    if (firstFrame)
+    {
       lastxpos = xpos;
       lastypos = ypos;
     }
@@ -453,16 +524,19 @@ int main(int argc, char *argv[]) {
     int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
 
     // close window on Ctrl-W press
-    if (w_state && ctrl_state) {
+    if (w_state && ctrl_state)
+    {
       break;
     }
     // close window on Ctrl-C press
-    if (c_state && ctrl_state) {
+    if (c_state && ctrl_state)
+    {
       break;
     }
 
     // If we click the mouse, we should rotate the camera
-    if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame) {
+    if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame)
+    {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
@@ -505,14 +579,18 @@ int main(int argc, char *argv[]) {
       frameID = 1;
     }
 
-    if (rstate == GPRT_PRESS && !io.WantCaptureMouse) {
+    if (rstate == GPRT_PRESS && !io.WantCaptureMouse)
+    {
       float3 view_vec = lookFrom - lookAt;
 
-      if (dy > 0.0) {
+      if (dy > 0.0)
+      {
         view_vec.x *= 0.95;
         view_vec.y *= 0.95;
         view_vec.z *= 0.95;
-      } else if (dy < 0.0) {
+      }
+      else if (dy < 0.0)
+      {
         view_vec.x *= 1.05;
         view_vec.y *= 1.05;
         view_vec.z *= 1.05;
@@ -525,7 +603,8 @@ int main(int argc, char *argv[]) {
       frameID = 1;
     }
 
-    if (mstate == GPRT_PRESS && !io.WantCaptureMouse) {
+    if (mstate == GPRT_PRESS && !io.WantCaptureMouse)
+    {
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
@@ -558,16 +637,17 @@ int main(int argc, char *argv[]) {
     static float clampMaxCumulativeValue = 1.f;
     static float unit = 0.1f;
     if (ImGui::SliderFloat("clamp max cumulative value",
-                           &clampMaxCumulativeValue, 0.f, 100.f)) {
+                           &clampMaxCumulativeValue, 0.f, 100.f))
+    {
       frameID = 1;
       majorantsOutOfDate = true;
       voxelized = false;
     }
     if (ImGui::InputFloat("delta tracking unit value", &unit))
       frameID = 1;
-    
+
     static bool visualizeAttributes = true;
-    if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes)) 
+    if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes))
     {
       frameID = 1;
       // majorantsOutOfDate = true; // might do this later...
@@ -603,7 +683,8 @@ int main(int argc, char *argv[]) {
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     // if we need to, revoxelize
-    if (mode == 2 && !voxelized) {
+    if (mode == 2 && !voxelized)
+    {
       auto accumParams =
           gprtComputeGetParameters<RayGenData>(AccumulateRBFBounds);
       auto avgParams = gprtComputeGetParameters<RayGenData>(AverageRBFBounds);
@@ -611,14 +692,15 @@ int main(int argc, char *argv[]) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
       gprtBufferClear(voxelVolume);
       gprtBufferClear(voxelVolumeCount);
-      gprtComputeLaunch1D(context, AccumulateRBFBounds, particles.size());
+      gprtComputeLaunch1D(context, AccumulateRBFBounds, particles[0].size());
       gprtComputeLaunch1D(context, AverageRBFBounds,
                           dims.x * dims.y * dims.z);
       voxelized = true;
     }
 
-    // if we need to, recompute majorants 
-    if (majorantsOutOfDate) {
+    // if we need to, recompute majorants
+    if (majorantsOutOfDate)
+    {
 
       gprtBufferClear(majorantVolume);
 
@@ -634,7 +716,8 @@ int main(int argc, char *argv[]) {
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
 
-    switch (mode) {
+    switch (mode)
+    {
     case 0:
       gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y);
       break;

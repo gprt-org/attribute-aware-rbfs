@@ -377,9 +377,9 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   // just the rendered image
   gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
 
-  if (any(pixelID == centerID)) {
-    finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
-  }
+  // if (any(pixelID == centerID)) {
+  //   finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
+  // }
 
   // Composite on top of everything else our user interface
   Texture2D texture = gprt::getTexture2DHandle(record.guiTexture);

@@ -59,17 +59,20 @@ std::vector<Point<DIM>> loadData(std::string const &filename,
 }
 #endif
 
-void importArborX(std::string path, std::vector<std::pair<uint64_t, float4>> &particleData)
+void importArborX(std::string path, std::vector<std::vector<std::pair<uint64_t, float4>>> &particleData)
 {
     #ifdef ARBORX
     std::cout << path << std::endl;
     auto result = loadData<3>(path);
 
+    // just one frame for now
+    particleData.resize(1);
+
     // Add particles to our particle array, computing AABB along the way 
-    particleData.resize(result.size());
+    particleData[0].resize(result.size());
 
     for (size_t i = 0; i < result.size(); ++i) {    
-      particleData[i].second = float4(result[i][0], result[i][1], result[i][2], float(i) / float(result.size()));
+      particleData[0][i].second = float4(result[i][0], result[i][1], result[i][2], float(i) / float(result.size()));
     }
     #else
     std::cerr << "ARBORX support not compiled into viewer" << std::endl;

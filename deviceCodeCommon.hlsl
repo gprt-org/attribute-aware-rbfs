@@ -38,6 +38,18 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
   float radius = record.rbfRadius;
 
   float3 clusterAABBMin, clusterAABBMax;
+
+  // need this check since particles per frame can vary
+  if (clusterID * particlesPerLeaf > numParticles) {
+    const static float NaN = 0.0f / 0.0f;
+    // negative volume box, should be culled away per spec
+    clusterAABBMin = float3(NaN, NaN, NaN);
+    clusterAABBMax = float3(NaN, NaN, NaN);
+    gprt::store(record.aabbs, 2 * clusterID, clusterAABBMin);
+    gprt::store(record.aabbs, 2 * clusterID + 1, clusterAABBMax);
+    return;
+  }
+  
   for (int i = 0; i < particlesPerLeaf; ++i) {
     int primID = DispatchThreadID.x * particlesPerLeaf + i;
     if (primID >= numParticles) break;
@@ -168,6 +180,9 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
   int particlesPerLeaf = record.particlesPerLeaf;
   
   float attributeMin, attributeMax;
+
+  // need this check since particles per frame can vary
+  if (DispatchThreadID.x * particlesPerLeaf > record.numParticles) return;
    
   // compute bounding box
   for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
