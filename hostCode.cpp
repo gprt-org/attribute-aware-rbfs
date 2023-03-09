@@ -66,8 +66,9 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-uint32_t particlesPerLeaf = 8;
-float rbfRadius = .5f; //3.f;
+uint32_t particlesPerLeaf = 4;
+// float rbfRadius = .01f; //3.f;
+float rbfRadius = 3.f; //3.f;
 std::vector<float4> particles;
 
 uint32_t structuredGridResolution = 256;
@@ -201,6 +202,8 @@ int main(int argc, char *argv[]) {
 
   auto frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  auto imageBuffer =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   auto accumBuffer =
       gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
@@ -229,7 +232,10 @@ int main(int argc, char *argv[]) {
   RayGenData *voxelRayGenData = gprtRayGenGetParameters(ParticleVoxelRayGen);
 
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
+  raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
+  raygenData.exposure = 1.f;
+  raygenData.gamma = 1.0f;
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
@@ -262,6 +268,8 @@ int main(int argc, char *argv[]) {
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
+  raygenData.numParticles = particles.size();
+  raygenData.particlesPerLeaf = particlesPerLeaf;
 
   // same parameters go to these compute programs too
   ParticleData *genParticlesData = gprtComputeGetParameters(GenParticles);
@@ -332,7 +340,7 @@ int main(int argc, char *argv[]) {
     uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
     // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
     gprtBufferClear(minMaxVolume);    
-    gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size());
+    gprtComputeLaunch1D(context, MinMaxRBFBounds, particles.size() / particlesPerLeaf);
     std::cout<<"- Done!"<<std::endl;
   }
 
@@ -348,6 +356,18 @@ int main(int argc, char *argv[]) {
   do {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
+
+    if (ImGui::Button("Save screenshot"))
+    {
+      gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
+    }
+
+    static float exposure = 1.f;
+    static float gamma = 1.0f;
+    ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 2.f);
+    ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 4.f);
+    raygenData.exposure = exposure;
+    raygenData.gamma = gamma;
 
     static int mode = 0;
     if (ImGui::RadioButton("Splatting", &mode, 0))

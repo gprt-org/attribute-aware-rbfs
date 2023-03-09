@@ -162,13 +162,31 @@ GPRT_COMPUTE_PROGRAM(ClearMinMaxGrid, (RayGenData, record), (1,1,1)) {
 }
 
 GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
-
-  
-  int primID = DispatchThreadID.x;
-  float4 particle = gprt::load<float4>(record.particles, primID);
   float radius = record.rbfRadius; // prior work just set this to some global constant.
-  float3 aabbMin = particle.xyz - float3(radius, radius, radius);
-  float3 aabbMax = particle.xyz + float3(radius, radius, radius);
+  float3 aabbMin;
+  float3 aabbMax;
+  int particlesPerLeaf = record.particlesPerLeaf;
+  
+  float attributeMin, attributeMax;
+   
+  // compute bounding box
+  for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
+    int primID = DispatchThreadID.x * particlesPerLeaf + i;
+    if (i >= record.numParticles) break;
+    
+    float4 particle = gprt::load<float4>(record.particles, primID);
+
+    if (i == 0) {
+      aabbMin = particle.xyz - float3(radius, radius, radius);
+      aabbMax = particle.xyz + float3(radius, radius, radius);
+      attributeMin = attributeMax = particle.w;
+    } else {
+      aabbMin = min(aabbMin, particle.xyz - float3(radius, radius, radius));
+      aabbMax = max(aabbMax, particle.xyz - float3(radius, radius, radius));
+      attributeMin = min(attributeMin, particle.w);
+      attributeMax = max(attributeMin, particle.w);
+    }
+  }
 
   float3 rt = record.globalAABBMax;
   float3 lb = record.globalAABBMin;
@@ -177,38 +195,17 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
   // transform particle into voxel space
-  aabbMin = worldPosToGrid(aabbMin, lb, rt, dims);
-  aabbMax = worldPosToGrid(aabbMax, lb, rt, dims);
+  float3 gridAabbMin = worldPosToGrid(aabbMin, lb, rt, dims);;
+  float3 gridAabbMax = worldPosToGrid(aabbMax, lb, rt, dims);;
 
   // just in case points touch sides, clamp
-  aabbMin = clamp(aabbMin, 0, dims - 1);
-  aabbMax = clamp(aabbMax, 0, dims - 1);
-
-  // if (primID == 0) printf("TEST\n");
-
-  // if (primID == 0)
-  //   printf("voxels touched: mn %d %d %d mx %d %d %d\n",
-  //     int(aabbMin.x), int(aabbMin.y), int(aabbMin.z),
-  //     int(aabbMax.x), int(aabbMax.y), int(aabbMax.z)
-  // );
-
-  // quick test
-  // if (primID == 0) 
-  // {
-  //   float3 worldAABBMin = gridPosToWorld(aabbMin, lb, rt, dims);
-  //   float3 worldAABBMax = gridPosToWorld(aabbMax, lb, rt, dims);
-  //   if (all(particle.xyz > worldAABBMin) && all(particle.xyz <= worldAABBMax)) {
-  //     printf("point in box!\n");
-  //   }
-  //   else {
-  //     printf("error, point not in box!\n");
-  //   }
-  // }
+  gridAabbMin = clamp(gridAabbMin, 0, dims - 1);
+  gridAabbMax = clamp(gridAabbMax, 0, dims - 1);
 
   // rasterize particle to all voxels it touches
-  for (uint z = aabbMin.z; z <= aabbMax.z; ++z) {
-    for (uint y = aabbMin.y; y <= aabbMax.y; ++y) {
-      for (uint x = aabbMin.x; x <= aabbMax.x; ++x) {
+  for (uint z = gridAabbMin.z; z <= gridAabbMax.z; ++z) {
+    for (uint y = gridAabbMin.y; y <= gridAabbMax.y; ++y) {
+      for (uint x = gridAabbMin.x; x <= gridAabbMax.x; ++x) {
         uint32_t addr = x + y * dims.x + z * dims.x * dims.y;
 
         // Find the nearest and farthest corners using 
@@ -224,23 +221,29 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
         float minDensity, maxDensity;
 
         // note, distances here are squared
-        float mnd = minDist(particle.xyz, lbPt, rtPt);
-        float mxd = maxDist(particle.xyz, lbPt, rtPt);
+        float mnd = minDist(aabbMin, aabbMax, lbPt, rtPt);
+        float mxd = maxDist(aabbMin, aabbMax, lbPt, rtPt);
+
+        // if (DispatchThreadID.x == 0) {
+        //   printf("min %f max %f\n", mnd, mxd);
+        // }
 
         // a little tricky here, minimum distance -> maximum density
-        if (mnd > radius * radius) maxDensity = 0.f;
-        else maxDensity = evaluate_rbf(mnd, radius);
+        // if (mnd > radius * radius) maxDensity = 0.f;
+        // else maxDensity = evaluate_rbf(mnd, radius);
 
-        if (mxd > radius * radius) minDensity = 0.f;
-        else minDensity = evaluate_rbf(mxd, radius);
+        // if (mxd > radius * radius) minDensity = 0.f;
+        // else minDensity = evaluate_rbf(mxd, radius);
+        // gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 0, minDensity);
+        // gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 1, maxDensity);
 
         // Keep track of the atomic sum of these two
-        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 0, minDensity);
-        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 1, maxDensity);
+        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 0, 0); // ...
+        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 1, particlesPerLeaf);
 
         // Keep track of the atomic min/max of these two
-        gprt::atomicMin32f(record.minMaxVolume, addr * 4 + 2, particle.w);
-        gprt::atomicMax32f(record.minMaxVolume, addr * 4 + 3, particle.w);
+        gprt::atomicMin32f(record.minMaxVolume, addr * 4 + 2, attributeMin);
+        gprt::atomicMax32f(record.minMaxVolume, addr * 4 + 3, attributeMax);
       }
     }
   }

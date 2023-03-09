@@ -361,9 +361,8 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   }
 
 
-
-  int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  float4 backgroundColor = (pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
+  float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
 
   color = over(color, backgroundColor);
 
@@ -371,10 +370,16 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   float4 finalColor = (1.f / float(frameId)) * color + (float(frameId - 1) / float(frameId)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
+  // exposure and gamma
+  finalColor.rgb = finalColor.rgb * record.exposure;
+  finalColor.rgb = pow(finalColor.rgb, record.gamma);
+
+  // just the rendered image
+  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
+
   if (any(pixelID == centerID)) {
     finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
   }
-
 
   // Composite on top of everything else our user interface
   Texture2D texture = gprt::getTexture2DHandle(record.guiTexture);

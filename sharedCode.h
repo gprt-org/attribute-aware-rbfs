@@ -48,6 +48,7 @@ struct ParticleData {
 struct RayGenData {
   alignas(16) gprt::Texture guiTexture;
   alignas(16) gprt::Buffer frameBuffer;
+  alignas(16) gprt::Buffer imageBuffer;
   alignas(16) gprt::Buffer accumBuffer;
   alignas(4) uint32_t frameID;
 
@@ -57,6 +58,8 @@ struct RayGenData {
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
   alignas(16) gprt::Buffer particles;
+  alignas(4) uint32_t particlesPerLeaf;
+  alignas(4) uint32_t numParticles;
 
   // colormap for visualization
   alignas(16) gprt::Texture densitymap;
@@ -98,6 +101,10 @@ struct RayGenData {
     alignas(16) float3 dir_du;
     alignas(16) float3 dir_dv;
   } camera;
+
+  alignas(4) float exposure;
+  alignas(4) float gamma;
+
 };
 
 /* variables for the miss program */
@@ -126,6 +133,7 @@ float evaluate_rbf(float3 X, float3 P, float r) {
 // d is the squared distance from the particle center to the intersection point
 // r is the radius of the particle
 float evaluate_rbf(float d, float r) {
+  if (d <= 0.f) return 1.f;
   return exp(-d / pow(r, 2.f));
 }
 
@@ -246,6 +254,45 @@ float minMaxDist(float3 p, float3 rmin, float3 rmax) {
 	}
 
 	return minimum;
+}
+
+// minDist computes the square of the distance from rectangle A to rectangle B.
+// If the rectangles touch then the distance is zero.
+// https://gist.github.com/dGr8LookinSparky/bd64a9f5f9deecf61e2c3c1592169c00
+float minDist(float3 armin, float3 armax, float3 brmin, float3 brmax) { 
+  float sum = 0.f;
+  for (int i = 0; i < 3; ++i) {
+    // if the right of b is less than the left of a
+    if (brmax[i] < armin[i]) {
+      // take the distance between these two walls
+      float dist = brmax[i] - armin[i];
+      // L2 dist
+      sum += dist * dist;
+    } 
+    // if the left of b is greater than the right of a
+    else if (brmin[i] > armax[i]) {
+      // take the distance between these two walls
+      float dist = brmin[i] - armax[i];
+      // L2 dist
+      sum += dist * dist;
+    }
+  }
+  return sum;
+}
+
+// maxDist computes the square of the distance from rectangle A to rectangle B.
+float maxDist(float3 armin, float3 armax, float3 brmin, float3 brmax) {
+	float sum = 0.0f;
+  for (int i = 0; i < 3; ++i) {
+    // take the max distance for this dimension and sum the square
+    float d1 = abs(armin[i] - brmin[i]);
+    float d2 = abs(armin[i] - brmax[i]);
+    float d3 = abs(armax[i] - brmin[i]);
+    float d4 = abs(armax[i] - brmax[i]);
+    float d = max(max(d1, d2), max(d3, d4));
+    sum += d * d;
+  }
+  return sum;
 }
 
 float3 worldPosToGrid(float3 worldPt, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
