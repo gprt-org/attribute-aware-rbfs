@@ -34,6 +34,7 @@
 
 #include <fstream>
 
+#include "importers/import_points.h"
 #include "importers/import_arborx.h"
 #include "importers/import_mmpld.h"
 #include <argparse/argparse.hpp>
@@ -58,7 +59,8 @@ extern GPRTProgram deviceCodeRBF;
 extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
-const int2 fbSize = {1334, 574};
+// const int2 fbSize = {1334, 574}; // teaser size
+const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -67,14 +69,14 @@ float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
 // uint32_t particlesPerLeaf = 4;
-uint32_t particlesPerLeaf = 8;
+uint32_t particlesPerLeaf = 16;
 // float rbfRadius = .01f; //3.f;
-float rbfRadius = 3.f; // 3.f;
+// float rbfRadius = 3.f; // 3.f;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
 uint32_t structuredGridResolution = 256;
-uint32_t ddaGridResolution = 128;
+uint32_t ddaGridResolution = 64;
 
 #include <iostream>
 int main(int argc, char *argv[])
@@ -86,6 +88,9 @@ int main(int argc, char *argv[])
       .default_value("");
   program.add_argument("--mmpld")
       .help("A path to a MMPLD dataset (ending in .mmpld)")
+      .default_value("");
+  program.add_argument("--points")
+      .help("A path to our custom points dataset (ending in .points)")
       .default_value("");
 
   try
@@ -103,11 +108,13 @@ int main(int argc, char *argv[])
 
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
+  std::string pointsPath = program.get<std::string>("--points");
   if (dbscanPath != "")
     importArborX(dbscanPath, particleData);
   else if (mmpldPath != "")
     importMMPLD(mmpldPath, particleData);
-
+  else if (pointsPath != "")
+    importPoints(pointsPath, particleData);
   else
   {
     particleData.resize(1);
@@ -133,14 +140,16 @@ int main(int argc, char *argv[])
   {
     for (size_t i = 0; i < particleData[j].size(); ++i)
     {
-      aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz() - rbfRadius);
-      aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz() + rbfRadius);
+      aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz());
+      aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz());
     }
   }
   std::cout << " - Done!" << std::endl;
 
   // set focus to aabb
   lookAt = (aabb[1] + aabb[0]) * .5f;
+
+  lookFrom = aabb[1];
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -275,13 +284,14 @@ int main(int argc, char *argv[])
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
   raygenData.exposure = 1.f;
   raygenData.gamma = 1.0f;
+  raygenData.spp = 1;
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
-  raygenData.rbfRadius = rbfRadius;
+  // raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -298,7 +308,7 @@ int main(int argc, char *argv[])
   ParticleData *particleRecord = gprtGeomGetParameters(particleGeom);
   // particleRecord->numParticles = particles[0].size();
   particleRecord->particlesPerLeaf = particlesPerLeaf;
-  particleRecord->rbfRadius = rbfRadius;
+  // particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
   particleRecord->colormap = gprtTextureGetHandle(colormap);
@@ -364,14 +374,43 @@ int main(int argc, char *argv[])
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.005f * diagonal;
+  float previousParticleRadius = 0.0001f * diagonal;
+  bool renderAnimation = false;
   do
   {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
 
+    
+
     static int particleFrame = 0;
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
+
+    if (ImGui::Button("Render Animation")) {
+      renderAnimation = true;
+      particleFrame = 0;
+      frameID = 1;
+    }
+
+    if (renderAnimation) {
+      std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
+      text += std::to_string(frameID) + " / 4000"; 
+      ImGui::Text(text.c_str());
+
+
+      if (frameID == 4000) {
+        std::string numberStr = std::to_string(particleFrame);
+        auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
+        gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
+
+        particleFrame++;
+        frameID = 1;
+        if (particleFrame == particles.size()) {
+          renderAnimation = false;
+          particleFrame = 0;
+        }
+      }
+    }
 
     if (previousParticleFrame != particleFrame) {    
       std::cout<<"Num particles "<< particles[particleFrame].size();
@@ -420,7 +459,7 @@ int main(int argc, char *argv[])
 
 
     static float rbfRadius = previousParticleRadius;
-    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.01f, .0001f * diagonal, .1f * diagonal);
+    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, .1f * diagonal, "%.5f");
 
     if (previousParticleRadius != rbfRadius) {
       particleRecord->rbfRadius = rbfRadius;
@@ -463,17 +502,21 @@ int main(int argc, char *argv[])
     {
       gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
     }
+    
 
     static float exposure = 1.f;
     static float gamma = 1.0f;
+    static int spp = 1;
+    ImGui::DragInt("Samples", &spp, 1, 1, 32);
     ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
     ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
+    raygenData.spp = spp;
 
     bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
 
-    static int mode = 1;
+    static int mode = 0;
     if (ImGui::RadioButton("Splatting", &mode, 0))
       frameID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
@@ -567,6 +610,7 @@ int main(int argc, char *argv[])
     int y_state = gprtGetKey(context, GPRT_KEY_Y);
     int z_state = gprtGetKey(context, GPRT_KEY_Z);
     int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
+    int left_shift = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
 
     // close window on Ctrl-W press
     if (w_state && ctrl_state)
@@ -582,14 +626,17 @@ int main(int argc, char *argv[])
 
     if (x_state) {
       lookUp = float3(1.f, 0.f, 0.f);
+      if (left_shift) lookUp *= -1.f;
     }
 
     if (y_state) {
       lookUp = float3(0.f, 1.f, 0.f);
+      if (left_shift) lookUp *= -1.f;
     }
 
     if (z_state) {
       lookUp = float3(0.f, 0.f, 1.f);
+      if (left_shift) lookUp *= -1.f;
     }
 
     // If we click the mouse, we should rotate the camera
@@ -791,7 +838,7 @@ int main(int argc, char *argv[])
 
     gprtBufferPresent(context, frameBuffer);
 
-    frameID++;
+    frameID ++;;
   } while (!gprtWindowShouldClose(context));
 
   LOG("cleaning up ...");

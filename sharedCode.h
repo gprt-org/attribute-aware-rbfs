@@ -102,6 +102,7 @@ struct RayGenData {
     alignas(16) float3 dir_dv;
   } camera;
 
+  alignas(4) int spp;
   alignas(4) float exposure;
   alignas(4) float gamma;
 
