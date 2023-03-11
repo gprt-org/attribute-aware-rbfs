@@ -475,7 +475,9 @@ int main(int argc, char *argv[])
       {
         auto result = colormapWidget.gradient().at(
             ImGG::RelativePosition(float(i + 1) / 65.f));
-        ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
+        auto transparency = colormapWidget.TransparencyAt(
+            (float(i + 1) / 65.f));
+        ptr[i] = make_rgba(float4(result.x, result.y, result.z, transparency));
       }
       gprtTextureUnmap(colormap);
 
