@@ -34,8 +34,8 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
   
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
-  float3 rt = record.globalAABBMax;
-  float3 lb = record.globalAABBMin;
+  float3 rt = record.globalAABBMax + record.rbfRadius;
+  float3 lb = record.globalAABBMin - record.rbfRadius;
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;

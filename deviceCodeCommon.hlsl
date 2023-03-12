@@ -289,15 +289,15 @@ GPRT_COMPUTE_PROGRAM(ComputeMajorantGrid, (RayGenData, record), (1,1,1)) {
   uint32_t start = uint32_t(clamp(minmax.x, 0.f, 1.f) * (densitymapWidth - 1));
   uint32_t stop  = uint32_t(clamp(minmax.y, 0.f, 1.f) * (densitymapWidth - 1));
   for (uint32_t i = start; i <= stop; ++i) {
-    densityMajorant = max(densityMajorant, densitymap[i].w);
+    densityMajorant = max(densityMajorant, pow(densitymap[i].w, 3));
   }
 
   // note, using "z" and "w", which store attribute range
-  start = uint32_t(clamp(minmax.z, 0.f, 1.f) * (colormapWidth - 1));
-  stop  = uint32_t(clamp(minmax.w, 0.f, 1.f) * (colormapWidth - 1));
+  start = uint32_t( floor( clamp(minmax.z, 0.f, 1.f) * colormapWidth)); 
+  stop  = uint32_t( ceil(clamp(minmax.w, 0.f, 1.f) * colormapWidth)); 
   float attributeMajorant;
-  for (uint32_t i = start; i <= stop; ++i) {
-    attributeMajorant = max(attributeMajorant, colormap[i].w);
+  for (uint32_t i = start; i < stop; ++i) {
+    attributeMajorant = max(attributeMajorant, pow(colormap[i].w, 3));
   }
 
   float majorant = densityMajorant;

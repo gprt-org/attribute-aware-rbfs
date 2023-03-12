@@ -116,10 +116,10 @@ class ParticleTracker {
       }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
       float4 densityxf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
-      float density = densityxf.w;
+      float density = pow(densityxf.w, 3);
 
       // allows colormap to hide attributes independent of RBF density
-      if (visualizeAttributes) density *= payload.color.w;
+      if (visualizeAttributes) density *= pow(payload.color.w, 3);
 
       if (lcg_randomf(rng) < density / (majorant)) {
         if (visualizeAttributes)
@@ -145,8 +145,8 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
-  float3 rt = record.globalAABBMax;
-  float3 lb = record.globalAABBMin;
+  float3 rt = record.globalAABBMax + record.rbfRadius;
+  float3 lb = record.globalAABBMin - record.rbfRadius;
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;

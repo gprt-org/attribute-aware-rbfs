@@ -59,8 +59,8 @@ extern GPRTProgram deviceCodeRBF;
 extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
-// const int2 fbSize = {1334, 574}; // teaser size
-const int2 fbSize = {1920, 1080};
+const int2 fbSize = {1334, 574}; // teaser size
+// const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -130,8 +130,8 @@ int main(int argc, char *argv[])
     for (uint32_t i = 0; i < particleData[0].size(); ++i)
     {
       float t = float(i) / float(particleData[0].size());
-      particleData[0][i].second = float4(100.f * t * sin(t * 256.f * 3.14f),
-                                         100.f * t * cos(t * 256.f * 3.14f),
+      particleData[0][i].second = float4(10.f * t * sin(t * 256.f * 3.14f),
+                                         10.f * t * cos(t * 256.f * 3.14f),
                                          0.f, t);
     }
   }
@@ -277,11 +277,11 @@ int main(int argc, char *argv[])
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
   // Colormap for visualization
-  auto colormap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
+  auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                     GPRT_FORMAT_R8G8B8A8_SRGB,
                                                     64, 1, 1, false, nullptr);
 
-  auto densitymap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
+  auto densitymap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                       GPRT_FORMAT_R8G8B8A8_SRGB,
                                                       64, 1, 1, false, nullptr);
 
@@ -372,9 +372,10 @@ int main(int argc, char *argv[])
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
+  
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget densitymapWidget{};
-
+  
   bool majorantsOutOfDate = true;
   bool voxelized = false;
   bool firstFrame = true;
@@ -388,7 +389,7 @@ int main(int argc, char *argv[])
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.0001f * diagonal;
+  float previousParticleRadius = 0.001f * diagonal;
   bool renderAnimation = false;
   do
   {
@@ -538,70 +539,55 @@ int main(int argc, char *argv[])
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
+    auto make_8bit = [](const float f) -> uint32_t
+    {
+      return std::min(255, std::max(0, int(f * 256.f)));
+    };
+    
+    gprtTextureMap(colormap);
     if (colormapWidget.widget("Attribute Colormap") || firstFrame)
     {
-      auto make_8bit = [](const float f) -> uint32_t
-      {
-        return std::min(255, std::max(0, int(f * 256.f)));
-      };
-
-      auto make_rgba = [make_8bit](float4 color) -> uint32_t
-      {
-        float gamma = 2.2;
-        color =
-            pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
-        return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) +
-               (make_8bit(color.z) << 16) + (make_8bit(color.w) << 24);
-      };
-
-      gprtTextureMap(colormap);
-      uint32_t *ptr = gprtTextureGetPointer(colormap);
+      uint8_t *ptr = gprtTextureGetPointer(colormap);
       for (uint32_t i = 0; i < 64; ++i)
       {
         auto result = colormapWidget.gradient().at(
-            ImGG::RelativePosition(float(i + 1) / 65.f));
-        auto transparency = colormapWidget.TransparencyAt(
-            (float(i + 1) / 65.f));
-        ptr[i] = make_rgba(float4(result.x, result.y, result.z, transparency));
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
+        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
       }
-      gprtTextureUnmap(colormap);
 
       frameID = 1;
-
       voxelized = false;
       majorantsOutOfDate = true;
     }
+    
+    gprtTextureUnmap(colormap);
 
-    if (densitymapWidget.widget("Density Colormap") || firstFrame)
+    gprtTextureMap(densitymap);
+
+    if (densitymapWidget.widget("RBF Color") || firstFrame)
     {
-      auto make_8bit = [](const float f) -> uint32_t
-      {
-        return std::min(255, std::max(0, int(f * 256.f)));
-      };
-
-      auto make_rgba = [make_8bit](float4 color) -> uint32_t
-      {
-        float gamma = 2.2;
-        color =
-            pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
-        return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) +
-               (make_8bit(color.z) << 16) + (make_8bit(color.w) << 24);
-      };
-
-      gprtTextureMap(densitymap);
-      uint32_t *ptr = gprtTextureGetPointer(densitymap);
+      uint8_t *ptr = gprtTextureGetPointer(densitymap);
       for (uint32_t i = 0; i < 64; ++i)
       {
         auto result = densitymapWidget.gradient().at(
-            ImGG::RelativePosition(float(i + 1) / 65.f));
-        ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
+        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
       }
-      gprtTextureUnmap(densitymap);
 
       frameID = 1;
       voxelized = false;
       majorantsOutOfDate = true;
     }
+
+    gprtTextureUnmap(densitymap);
 
     float speed = .001f;
     lastxpos = xpos;
