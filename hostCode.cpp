@@ -284,6 +284,10 @@ int main(int argc, char *argv[])
   auto densitymap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                       GPRT_FORMAT_R8G8B8A8_SRGB,
                                                       64, 1, 1, false, nullptr);
+  
+  auto radiusmap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
+                                                      GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                      64, 1, 1, false, nullptr);
 
   auto sampler =
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
@@ -301,6 +305,7 @@ int main(int argc, char *argv[])
   raygenData.spp = 1;
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
+  raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
   raygenData.globalAABBMin = aabb[0];
@@ -327,6 +332,7 @@ int main(int argc, char *argv[])
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
   particleRecord->colormap = gprtTextureGetHandle(colormap);
   particleRecord->densitymap = gprtTextureGetHandle(densitymap);
+  particleRecord->radiusmap = gprtTextureGetHandle(radiusmap);
   particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
 
   // also assign particles to raygen
@@ -372,9 +378,12 @@ int main(int argc, char *argv[])
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
-  
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget densitymapWidget{};
+  ImGG::GradientWidget radiusmapWidget{};
+
+  ImGG::Settings grayscaleWidgetSettings{};
+  grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
   
   bool majorantsOutOfDate = true;
   bool voxelized = false;
@@ -476,7 +485,76 @@ int main(int argc, char *argv[])
     static float rbfRadius = previousParticleRadius;
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, .1f * diagonal, "%.5f");
 
-    if (previousParticleRadius != rbfRadius) {
+    auto make_8bit = [](const float f) -> uint32_t
+    {
+      return std::min(255, std::max(0, int(f * 256.f)));
+    };
+    
+    if (colormapWidget.widget("Attribute Colormap") || firstFrame)
+    {
+      gprtTextureMap(colormap);
+      uint8_t *ptr = gprtTextureGetPointer(colormap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = colormapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
+        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(colormap);
+    }
+    
+    if (densitymapWidget.widget("RBF Color") || firstFrame)
+    {
+      gprtTextureMap(densitymap);
+      uint8_t *ptr = gprtTextureGetPointer(densitymap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = densitymapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
+        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(densitymap);
+    }
+
+
+    bool radiusEdited = false;
+    if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) || firstFrame)
+    {
+      radiusEdited = true;
+      gprtTextureMap(radiusmap);
+      uint8_t *ptr = gprtTextureGetPointer(radiusmap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = radiusmapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(radiusmap);
+    }
+
+
+    if (previousParticleRadius != rbfRadius || radiusEdited) {
       particleRecord->rbfRadius = rbfRadius;
       raygenData.rbfRadius = rbfRadius;
       *genRBFBoundsData = *particleRecord;
@@ -539,55 +617,7 @@ int main(int argc, char *argv[])
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
-    auto make_8bit = [](const float f) -> uint32_t
-    {
-      return std::min(255, std::max(0, int(f * 256.f)));
-    };
-    
-    gprtTextureMap(colormap);
-    if (colormapWidget.widget("Attribute Colormap") || firstFrame)
-    {
-      uint8_t *ptr = gprtTextureGetPointer(colormap);
-      for (uint32_t i = 0; i < 64; ++i)
-      {
-        auto result = colormapWidget.gradient().at(
-            ImGG::RelativePosition(i / 63.f)
-        );
-        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
-        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
-        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
-        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
-      }
 
-      frameID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
-    }
-    
-    gprtTextureUnmap(colormap);
-
-    gprtTextureMap(densitymap);
-
-    if (densitymapWidget.widget("RBF Color") || firstFrame)
-    {
-      uint8_t *ptr = gprtTextureGetPointer(densitymap);
-      for (uint32_t i = 0; i < 64; ++i)
-      {
-        auto result = densitymapWidget.gradient().at(
-            ImGG::RelativePosition(i / 63.f)
-        );
-        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
-        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
-        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
-        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
-      }
-
-      frameID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
-    }
-
-    gprtTextureUnmap(densitymap);
 
     float speed = .001f;
     lastxpos = xpos;

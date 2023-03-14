@@ -37,11 +37,15 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
   uint32_t numParticles = record.numParticles;
   float radius = record.rbfRadius;
 
-  float3 clusterAABBMin, clusterAABBMax;
+  float3 clusterAABBMin = float3(1.#INF, 1.#INF, 1.#INF);
+  float3 clusterAABBMax = float3(-1.#INF, -1.#INF, -1.#INF);
+  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
+  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
+
+  const static float NaN = 0.0f / 0.0f;
 
   // need this check since particles per frame can vary
   if (clusterID * particlesPerLeaf > numParticles) {
-    const static float NaN = 0.0f / 0.0f;
     // negative volume box, should be culled away per spec
     clusterAABBMin = float3(NaN, NaN, NaN);
     clusterAABBMax = float3(NaN, NaN, NaN);
@@ -55,8 +59,13 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
     if (primID >= numParticles) break;
 
     float4 particle = gprt::load<float4>(record.particles, primID);
-    float3 aabbMin = particle.xyz - float3(radius, radius, radius);
-    float3 aabbMax = particle.xyz + float3(radius, radius, radius);
+    float radiusPercent = radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
+
+    // if (clusterID == 0) printf("radiusPercent %f\n", radiusPercent);
+    if (radiusPercent == 0.f) continue;
+
+    float3 aabbMin = particle.xyz - float3(radius, radius, radius) * radiusPercent;
+    float3 aabbMax = particle.xyz + float3(radius, radius, radius) * radiusPercent;
     if (i == 0) {
       clusterAABBMin = aabbMin;
       clusterAABBMax = aabbMax;
@@ -65,6 +74,11 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
       clusterAABBMin = min(clusterAABBMin, aabbMin);
       clusterAABBMax = max(clusterAABBMax, aabbMax);
     }
+  }
+  if (any(clusterAABBMin > clusterAABBMax)) {
+    // negative volume box, should be culled away per spec
+    clusterAABBMin = float3(NaN, NaN, NaN);
+    clusterAABBMax = float3(NaN, NaN, NaN);
   }
   gprt::store(record.aabbs, 2 * clusterID, clusterAABBMin);
   gprt::store(record.aabbs, 2 * clusterID + 1, clusterAABBMax);
