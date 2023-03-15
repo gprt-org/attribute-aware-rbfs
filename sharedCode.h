@@ -39,6 +39,7 @@ struct ParticleData {
   alignas(4) int visualizeAttributes;
   alignas(16) gprt::Texture densitymap;
   alignas(16) gprt::Texture colormap;
+  alignas(16) gprt::Texture radiusmap;
   alignas(16) gprt::Sampler colormapSampler;
 
   alignas(16) gprt::Buffer particles;
@@ -64,6 +65,7 @@ struct RayGenData {
   // colormap for visualization
   alignas(16) gprt::Texture densitymap;
   alignas(16) gprt::Texture colormap;
+  alignas(16) gprt::Texture radiusmap;
   alignas(16) gprt::Sampler colormapSampler;
 
   // In the case that we end up rasterizing our particles
@@ -102,6 +104,7 @@ struct RayGenData {
     alignas(16) float3 dir_dv;
   } camera;
 
+  alignas(4) int spp;
   alignas(4) float exposure;
   alignas(4) float gamma;
 

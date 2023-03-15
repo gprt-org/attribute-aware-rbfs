@@ -34,6 +34,7 @@
 
 #include <fstream>
 
+#include "importers/import_points.h"
 #include "importers/import_arborx.h"
 #include "importers/import_mmpld.h"
 #include <argparse/argparse.hpp>
@@ -58,7 +59,8 @@ extern GPRTProgram deviceCodeRBF;
 extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
-const int2 fbSize = {1000, 1000};
+const int2 fbSize = {1334, 574}; // teaser size
+// const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -66,9 +68,10 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-uint32_t particlesPerLeaf = 4;
+// uint32_t particlesPerLeaf = 4;
+uint32_t particlesPerLeaf = 16;
 // float rbfRadius = .01f; //3.f;
-float rbfRadius = 3.f; // 3.f;
+// float rbfRadius = 3.f; // 3.f;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
@@ -85,6 +88,9 @@ int main(int argc, char *argv[])
       .default_value("");
   program.add_argument("--mmpld")
       .help("A path to a MMPLD dataset (ending in .mmpld)")
+      .default_value("");
+  program.add_argument("--points")
+      .help("A path to our custom points dataset (ending in .points)")
       .default_value("");
 
   program.add_argument("--camera")
@@ -110,11 +116,13 @@ int main(int argc, char *argv[])
 
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
+  std::string pointsPath = program.get<std::string>("--points");
   if (dbscanPath != "")
     importArborX(dbscanPath, particleData);
   else if (mmpldPath != "")
     importMMPLD(mmpldPath, particleData);
-
+  else if (pointsPath != "")
+    importPoints(pointsPath, particleData);
   else
   {
     particleData.resize(1);
@@ -122,8 +130,8 @@ int main(int argc, char *argv[])
     for (uint32_t i = 0; i < particleData[0].size(); ++i)
     {
       float t = float(i) / float(particleData[0].size());
-      particleData[0][i].second = float4(100.f * t * sin(t * 256.f * 3.14f),
-                                         100.f * t * cos(t * 256.f * 3.14f),
+      particleData[0][i].second = float4(10.f * t * sin(t * 256.f * 3.14f),
+                                         10.f * t * cos(t * 256.f * 3.14f),
                                          0.f, t);
     }
   }
@@ -146,14 +154,16 @@ int main(int argc, char *argv[])
   {
     for (size_t i = 0; i < particleData[j].size(); ++i)
     {
-      aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz() - rbfRadius);
-      aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz() + rbfRadius);
+      aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz());
+      aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz());
     }
   }
   std::cout << " - Done!" << std::endl;
 
   // set focus to aabb
   lookAt = (aabb[1] + aabb[0]) * .5f;
+
+  lookFrom = aabb[1];
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -267,11 +277,15 @@ int main(int argc, char *argv[])
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
   // Colormap for visualization
-  auto colormap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
+  auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                     GPRT_FORMAT_R8G8B8A8_SRGB,
                                                     64, 1, 1, false, nullptr);
 
-  auto densitymap = gprtDeviceTextureCreate<uint32_t>(context, GPRT_IMAGE_TYPE_1D,
+  auto densitymap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
+                                                      GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                      64, 1, 1, false, nullptr);
+  
+  auto radiusmap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                       GPRT_FORMAT_R8G8B8A8_SRGB,
                                                       64, 1, 1, false, nullptr);
 
@@ -288,13 +302,15 @@ int main(int argc, char *argv[])
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
   raygenData.exposure = 1.f;
   raygenData.gamma = 1.0f;
+  raygenData.spp = 1;
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
+  raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
-  raygenData.rbfRadius = rbfRadius;
+  // raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
   missData->color0 = float3(0.1f, 0.1f, 0.1f);
@@ -311,11 +327,12 @@ int main(int argc, char *argv[])
   ParticleData *particleRecord = gprtGeomGetParameters(particleGeom);
   // particleRecord->numParticles = particles[0].size();
   particleRecord->particlesPerLeaf = particlesPerLeaf;
-  particleRecord->rbfRadius = rbfRadius;
+  // particleRecord->rbfRadius = rbfRadius;
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
   particleRecord->colormap = gprtTextureGetHandle(colormap);
   particleRecord->densitymap = gprtTextureGetHandle(densitymap);
+  particleRecord->radiusmap = gprtTextureGetHandle(radiusmap);
   particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
 
   // also assign particles to raygen
@@ -363,7 +380,11 @@ int main(int argc, char *argv[])
 
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget densitymapWidget{};
+  ImGG::GradientWidget radiusmapWidget{};
 
+  ImGG::Settings grayscaleWidgetSettings{};
+  grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
+  
   bool majorantsOutOfDate = true;
   bool voxelized = false;
   bool firstFrame = true;
@@ -374,20 +395,53 @@ int main(int argc, char *argv[])
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
 
+  float diagonal = length(aabb[1] - aabb[0]);
+
   int previousParticleFrame = -1;
+  float previousParticleRadius = 0.001f * diagonal;
+  bool renderAnimation = false;
   do
   {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
 
+    
+
     static int particleFrame = 0;
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
-    if (previousParticleFrame != particleFrame) {    
+    if (ImGui::Button("Render Animation")) {
+      renderAnimation = true;
+      particleFrame = 0;
+      frameID = 1;
+    }
 
+    if (renderAnimation) {
+      std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
+      text += std::to_string(frameID) + " / 4000"; 
+      ImGui::Text(text.c_str());
+
+
+      if (frameID == 4000) {
+        std::string numberStr = std::to_string(particleFrame);
+        auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
+        gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
+
+        particleFrame++;
+        frameID = 1;
+        if (particleFrame == particles.size()) {
+          renderAnimation = false;
+          particleFrame = 0;
+        }
+      }
+    }
+
+    if (previousParticleFrame != particleFrame) {    
       std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord->numParticles = particles[particleFrame].size();
+      particleRecord->rbfRadius = previousParticleRadius;
       raygenData.numParticles = particles[particleFrame].size();
+      raygenData.rbfRadius = previousParticleRadius;
 
       // Upload some particles
       gprtBufferMap(particleBuffer);
@@ -403,9 +457,114 @@ int main(int argc, char *argv[])
       gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
 
       // Now we can build the tree
-      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE, true, true);
-      //, /* compact tree */ true, /* minimize memory */ true);
-      gprtAccelCompact(context, particleAccel); // not sure why, but this causes things to crash...
+      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+      // Assign tree to raygen parameters
+      raygenData.world = gprtAccelGetHandle(world);
+
+      // compute minmax ranges
+      {
+        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        *params = raygenData;
+        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        gprtBufferClear(minMaxVolume);
+        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        std::cout << "- Done!" << std::endl;
+      }
+      
+      voxelized = false;
+      majorantsOutOfDate = true;
+      frameID = 1;
+      previousParticleFrame = particleFrame;
+    }
+
+
+    static float rbfRadius = previousParticleRadius;
+    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, .1f * diagonal, "%.5f");
+
+    auto make_8bit = [](const float f) -> uint32_t
+    {
+      return std::min(255, std::max(0, int(f * 256.f)));
+    };
+    
+    if (colormapWidget.widget("Attribute Colormap") || firstFrame)
+    {
+      gprtTextureMap(colormap);
+      uint8_t *ptr = gprtTextureGetPointer(colormap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = colormapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
+        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(colormap);
+    }
+    
+    if (densitymapWidget.widget("RBF Color") || firstFrame)
+    {
+      gprtTextureMap(densitymap);
+      uint8_t *ptr = gprtTextureGetPointer(densitymap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = densitymapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
+        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(densitymap);
+    }
+
+
+    bool radiusEdited = false;
+    if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) || firstFrame)
+    {
+      radiusEdited = true;
+      gprtTextureMap(radiusmap);
+      uint8_t *ptr = gprtTextureGetPointer(radiusmap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = radiusmapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(radiusmap);
+    }
+
+
+    if (previousParticleRadius != rbfRadius || radiusEdited) {
+      particleRecord->rbfRadius = rbfRadius;
+      raygenData.rbfRadius = rbfRadius;
+      *genRBFBoundsData = *particleRecord;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+      // Regenerate bounding boxes for new radius
+      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
+
+      // Now we can refit the tree
+      gprtAccelUpdate(context, particleAccel);
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
 
       // Assign tree to raygen parameters
@@ -429,21 +588,26 @@ int main(int argc, char *argv[])
       voxelized = false;
       majorantsOutOfDate = true;
       frameID = 1;
-      previousParticleFrame = particleFrame;
+      previousParticleRadius = rbfRadius;
     }
-
 
     if (ImGui::Button("Save screenshot"))
     {
       gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
     }
+    
 
     static float exposure = 1.f;
     static float gamma = 1.0f;
-    ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 2.f);
-    ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 4.f);
+    static int spp = 1;
+    ImGui::DragInt("Samples", &spp, 1, 1, 32);
+    ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
+    ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
+    raygenData.spp = spp;
+
+    bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
 
     static int mode = 0;
     if (ImGui::RadioButton("Splatting", &mode, 0))
@@ -453,70 +617,7 @@ int main(int argc, char *argv[])
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
 
-    if (colormapWidget.widget("Attribute Colormap") || firstFrame)
-    {
-      auto make_8bit = [](const float f) -> uint32_t
-      {
-        return std::min(255, std::max(0, int(f * 256.f)));
-      };
 
-      auto make_rgba = [make_8bit](float4 color) -> uint32_t
-      {
-        float gamma = 2.2;
-        color =
-            pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
-        return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) +
-               (make_8bit(color.z) << 16) + (make_8bit(color.w) << 24);
-      };
-
-      gprtTextureMap(colormap);
-      uint32_t *ptr = gprtTextureGetPointer(colormap);
-      for (uint32_t i = 0; i < 64; ++i)
-      {
-        auto result = colormapWidget.gradient().at(
-            ImGG::RelativePosition(float(i + 1) / 65.f));
-        auto transparency = colormapWidget.TransparencyAt(
-            (float(i + 1) / 65.f));
-        ptr[i] = make_rgba(float4(result.x, result.y, result.z, transparency));
-      }
-      gprtTextureUnmap(colormap);
-
-      frameID = 1;
-
-      voxelized = false;
-      majorantsOutOfDate = true;
-    }
-
-    if (densitymapWidget.widget("Density Colormap") || firstFrame)
-    {
-      auto make_8bit = [](const float f) -> uint32_t
-      {
-        return std::min(255, std::max(0, int(f * 256.f)));
-      };
-
-      auto make_rgba = [make_8bit](float4 color) -> uint32_t
-      {
-        float gamma = 2.2;
-        color =
-            pow(color, float4(1.0f / gamma, 1.0f / gamma, 1.0f / gamma, 1.0f));
-        return (make_8bit(color.x) << 0) + (make_8bit(color.y) << 8) +
-               (make_8bit(color.z) << 16) + (make_8bit(color.w) << 24);
-      };
-
-      gprtTextureMap(densitymap);
-      uint32_t *ptr = gprtTextureGetPointer(densitymap);
-      for (uint32_t i = 0; i < 64; ++i)
-      {
-        auto result = densitymapWidget.gradient().at(
-            ImGG::RelativePosition(float(i + 1) / 65.f));
-        ptr[i] = make_rgba(float4(result.x, result.y, result.z, result.w));
-      }
-      gprtTextureUnmap(densitymap);
-
-      frameID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
-    }
 
     float speed = .001f;
     lastxpos = xpos;
@@ -537,7 +638,11 @@ int main(int argc, char *argv[])
 
     int w_state = gprtGetKey(context, GPRT_KEY_W);
     int c_state = gprtGetKey(context, GPRT_KEY_C);
+    int x_state = gprtGetKey(context, GPRT_KEY_X);
+    int y_state = gprtGetKey(context, GPRT_KEY_Y);
+    int z_state = gprtGetKey(context, GPRT_KEY_Z);
     int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
+    int left_shift = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
 
     // close window on Ctrl-W press
     if (w_state && ctrl_state)
@@ -550,8 +655,24 @@ int main(int argc, char *argv[])
       break;
     }
 
+
+    if (x_state) {
+      lookUp = float3(1.f, 0.f, 0.f);
+      if (left_shift) lookUp *= -1.f;
+    }
+
+    if (y_state) {
+      lookUp = float3(0.f, 1.f, 0.f);
+      if (left_shift) lookUp *= -1.f;
+    }
+
+    if (z_state) {
+      lookUp = float3(0.f, 0.f, 1.f);
+      if (left_shift) lookUp *= -1.f;
+    }
+
     // If we click the mouse, we should rotate the camera
-    if (state == GPRT_PRESS && !io.WantCaptureMouse || firstFrame)
+    if (state == GPRT_PRESS && !io.WantCaptureMouse || x_state || y_state || z_state || fovChanged || firstFrame)
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -651,9 +772,9 @@ int main(int argc, char *argv[])
     }
 
     static float clampMaxCumulativeValue = 1.f;
-    static float unit = 0.1f;
-    if (ImGui::SliderFloat("clamp max cumulative value",
-                           &clampMaxCumulativeValue, 0.f, 100.f))
+    static float unit = previousParticleRadius;
+    if (ImGui::DragFloat("clamp max cumulative value",
+                           &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
     {
       frameID = 1;
       majorantsOutOfDate = true;
@@ -749,7 +870,7 @@ int main(int argc, char *argv[])
 
     gprtBufferPresent(context, frameBuffer);
 
-    frameID++;
+    frameID ++;;
   } while (!gprtWindowShouldClose(context));
 
   LOG("cleaning up ...");

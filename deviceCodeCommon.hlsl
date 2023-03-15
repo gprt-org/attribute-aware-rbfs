@@ -37,11 +37,15 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
   uint32_t numParticles = record.numParticles;
   float radius = record.rbfRadius;
 
-  float3 clusterAABBMin, clusterAABBMax;
+  float3 clusterAABBMin = float3(1.#INF, 1.#INF, 1.#INF);
+  float3 clusterAABBMax = float3(-1.#INF, -1.#INF, -1.#INF);
+  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
+  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
+
+  const static float NaN = 0.0f / 0.0f;
 
   // need this check since particles per frame can vary
   if (clusterID * particlesPerLeaf > numParticles) {
-    const static float NaN = 0.0f / 0.0f;
     // negative volume box, should be culled away per spec
     clusterAABBMin = float3(NaN, NaN, NaN);
     clusterAABBMax = float3(NaN, NaN, NaN);
@@ -55,8 +59,13 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
     if (primID >= numParticles) break;
 
     float4 particle = gprt::load<float4>(record.particles, primID);
-    float3 aabbMin = particle.xyz - float3(radius, radius, radius);
-    float3 aabbMax = particle.xyz + float3(radius, radius, radius);
+    float radiusPercent = radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
+
+    // if (clusterID == 0) printf("radiusPercent %f\n", radiusPercent);
+    if (radiusPercent == 0.f) continue;
+
+    float3 aabbMin = particle.xyz - float3(radius, radius, radius) * radiusPercent;
+    float3 aabbMax = particle.xyz + float3(radius, radius, radius) * radiusPercent;
     if (i == 0) {
       clusterAABBMin = aabbMin;
       clusterAABBMax = aabbMax;
@@ -65,6 +74,11 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
       clusterAABBMin = min(clusterAABBMin, aabbMin);
       clusterAABBMax = max(clusterAABBMax, aabbMax);
     }
+  }
+  if (any(clusterAABBMin > clusterAABBMax)) {
+    // negative volume box, should be culled away per spec
+    clusterAABBMin = float3(NaN, NaN, NaN);
+    clusterAABBMax = float3(NaN, NaN, NaN);
   }
   gprt::store(record.aabbs, 2 * clusterID, clusterAABBMin);
   gprt::store(record.aabbs, 2 * clusterID + 1, clusterAABBMax);
@@ -197,7 +211,7 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
       attributeMin = attributeMax = particle.w;
     } else {
       aabbMin = min(aabbMin, particle.xyz - float3(radius, radius, radius));
-      aabbMax = max(aabbMax, particle.xyz - float3(radius, radius, radius));
+      aabbMax = max(aabbMax, particle.xyz + float3(radius, radius, radius));
       attributeMin = min(attributeMin, particle.w);
       attributeMax = max(attributeMin, particle.w);
     }
@@ -289,15 +303,15 @@ GPRT_COMPUTE_PROGRAM(ComputeMajorantGrid, (RayGenData, record), (1,1,1)) {
   uint32_t start = uint32_t(clamp(minmax.x, 0.f, 1.f) * (densitymapWidth - 1));
   uint32_t stop  = uint32_t(clamp(minmax.y, 0.f, 1.f) * (densitymapWidth - 1));
   for (uint32_t i = start; i <= stop; ++i) {
-    densityMajorant = max(densityMajorant, densitymap[i].w);
+    densityMajorant = max(densityMajorant, pow(densitymap[i].w, 3));
   }
 
   // note, using "z" and "w", which store attribute range
-  start = uint32_t(clamp(minmax.z, 0.f, 1.f) * (colormapWidth - 1));
-  stop  = uint32_t(clamp(minmax.w, 0.f, 1.f) * (colormapWidth - 1));
+  start = uint32_t( floor( clamp(minmax.z, 0.f, 1.f) * colormapWidth)); 
+  stop  = uint32_t( ceil(clamp(minmax.w, 0.f, 1.f) * colormapWidth)); 
   float attributeMajorant;
-  for (uint32_t i = start; i <= stop; ++i) {
-    attributeMajorant = max(attributeMajorant, colormap[i].w);
+  for (uint32_t i = start; i < stop; ++i) {
+    attributeMajorant = max(attributeMajorant, pow(colormap[i].w, 3));
   }
 
   float majorant = densityMajorant;
