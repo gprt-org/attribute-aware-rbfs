@@ -112,11 +112,11 @@ class ParticleTracker {
               payload                  // the payload IO
       );
       if (payload.count > 0) {
-        payload.color /= float(payload.count);
+        payload.color /= payload.density; //float(payload.count);
 
         if (!disableColorCorrection) {
           payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f); // note, only square rooting rbg
-        }        
+        }
       }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
       float4 densityxf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
@@ -266,9 +266,10 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         );
         if (payload.count > 0) {
           payload.rgb /= float(payload.count);
-          payload.rgb = pow(payload.rgb, 1.f / 2.f);
+          payload.rgb = pow(payload.rgb, 1.f / 2.2f);
         }
         if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
+
         float4 xf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
 
         if (lcg_randomf(rng) < xf.w / (majorantExtinction)) {
@@ -436,9 +437,9 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   float4 color = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f);
 
   if (record.disableColorCorrection) {
-    payload.color.rgb += color.rgb;
+    payload.color.rgb += color.rgb * hit_particle.density;
   } else {
-    payload.color.rgb += pow(color.rgb, 2.2f);
+    payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density;
   }
   payload.color.a += color.a;
   
