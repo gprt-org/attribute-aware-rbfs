@@ -865,8 +865,7 @@ int main(int argc, char *argv[])
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
 
-    static double tfirst = gprtGetTime(context);
-    static double tlast = tfirst;
+    gprtBeginProfile(context);
 
     raygenData.frameID = frameID;
 
@@ -889,9 +888,10 @@ int main(int argc, char *argv[])
       break;
     }
 
-    double tnow = gprtGetTime(context);
-    static double tavg = tnow-tlast;
-    tavg = 0.8*tavg + 0.2*(tnow-tlast);
+    double profile = gprtEndProfile(context) / 1e9;
+    static double tavg = profile;
+    tavg = 0.8*tavg + 0.2*profile;
+
     std::stringstream fps;
     fps << std::ios::fixed;
     fps << std::setprecision(2);
