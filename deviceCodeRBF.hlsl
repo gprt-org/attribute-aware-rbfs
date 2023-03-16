@@ -50,6 +50,7 @@ class ParticleTracker {
 
   bool dbg;
   bool visualizeAttributes;
+  bool disableColorCorrection;
 
   gprt::Buffer majorants;
   gprt::Texture dmap;
@@ -112,7 +113,10 @@ class ParticleTracker {
       );
       if (payload.count > 0) {
         payload.color /= float(payload.count);
-        payload.color.rgb = pow(payload.color.rgb, 1.f / 2.f); // note, only square rooting rbg
+
+        if (!disableColorCorrection) {
+          payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f); // note, only square rooting rbg
+        }        
       }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
       float4 densityxf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
@@ -167,6 +171,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
   ParticleTracker tracker;
+  tracker.disableColorCorrection = record.disableColorCorrection;
   tracker.majorants = record.majorants;
   tracker.dimensions = record.ddaDimensions;
   tracker.i = 0;
@@ -371,7 +376,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
 
   // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
 
   sppColor = over(sppColor, backgroundColor);
 
@@ -430,7 +435,11 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   float4 color = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f);
 
-  payload.color.rgb += pow(color.rgb, 2.f);
+  if (record.disableColorCorrection) {
+    payload.color.rgb += color.rgb;
+  } else {
+    payload.color.rgb += pow(color.rgb, 2.2f);
+  }
   payload.color.a += color.a;
   
   if (record.clampMaxCumulativeValue > 0.f) {

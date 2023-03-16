@@ -44,6 +44,8 @@ struct ParticleData {
 
   alignas(16) gprt::Buffer particles;
   alignas(16) gprt::Buffer aabbs;
+
+  alignas(4) int disableColorCorrection;
 };
 
 struct RayGenData {
@@ -90,6 +92,8 @@ struct RayGenData {
 
   // If true, renders the time that it takes to render the given image
   alignas(4) int showHeatmap;
+
+  alignas(4) int disableColorCorrection;
 
   struct {
     alignas(4) float azimuth;

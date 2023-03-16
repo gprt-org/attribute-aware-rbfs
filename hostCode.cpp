@@ -59,7 +59,8 @@ extern GPRTProgram deviceCodeRBF;
 extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
-const int2 fbSize = {1334, 574}; // teaser size
+// const int2 fbSize = {1334, 574}; // teaser size
+const int2 fbSize = {1024, 1024}; // teaser size
 // const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
@@ -96,7 +97,7 @@ int main(int argc, char *argv[])
   program.add_argument("--camera")
     .nargs(10)
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
-    .default_value(std::vector<float>{3.5f, 3.5f, 3.5f,
+    .default_value(std::vector<float>{0.f, 0.f, -1.f,
                                       0.f, 0.f, 0.f,
                                       0.f, -1.f, 0.f,
                                       0.66f})
@@ -125,14 +126,20 @@ int main(int argc, char *argv[])
     importPoints(pointsPath, particleData);
   else
   {
-    particleData.resize(1);
-    particleData[0].resize(10000);
-    for (uint32_t i = 0; i < particleData[0].size(); ++i)
-    {
-      float t = float(i) / float(particleData[0].size());
-      particleData[0][i].second = float4(10.f * t * sin(t * 256.f * 3.14f),
-                                         10.f * t * cos(t * 256.f * 3.14f),
-                                         0.f, t);
+    particleData.resize(100);
+    for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+      particleData[frame].resize(3);
+      for (uint32_t i = 0; i < particleData[frame].size(); ++i)
+      {
+        float t1 = float(i) / float(particleData[frame].size());
+        
+        float t2 = float(frame) / float(particleData.size());
+
+        particleData[frame][i].second = float4(
+          (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
+          (cos(t2 * 3.14) * .5 + .5) * cos(t1 * 2.f * 3.14f),
+          0.f, t1);
+      }
     }
   }
 
@@ -161,9 +168,9 @@ int main(int argc, char *argv[])
   std::cout << " - Done!" << std::endl;
 
   // set focus to aabb
-  lookAt = (aabb[1] + aabb[0]) * .5f;
+  // lookAt = (aabb[1] + aabb[0]) * .5f;
 
-  lookFrom = aabb[1];
+  // lookFrom = aabb[1];
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -310,6 +317,7 @@ int main(int argc, char *argv[])
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
+  raygenData.disableColorCorrection = false;
   // raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -334,6 +342,7 @@ int main(int argc, char *argv[])
   particleRecord->densitymap = gprtTextureGetHandle(densitymap);
   particleRecord->radiusmap = gprtTextureGetHandle(radiusmap);
   particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
+  particleRecord->disableColorCorrection = false;
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
@@ -404,7 +413,6 @@ int main(int argc, char *argv[])
   {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
-
     
 
     static int particleFrame = 0;
@@ -481,9 +489,8 @@ int main(int argc, char *argv[])
       previousParticleFrame = particleFrame;
     }
 
-
     static float rbfRadius = previousParticleRadius;
-    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, .1f * diagonal, "%.5f");
+    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
 
     auto make_8bit = [](const float f) -> uint32_t
     {
@@ -553,6 +560,13 @@ int main(int argc, char *argv[])
       gprtTextureUnmap(radiusmap);
     }
 
+    static bool disableColorCorrection = false;
+    if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
+      particleRecord->disableColorCorrection = disableColorCorrection;
+      raygenData.disableColorCorrection = disableColorCorrection;
+      voxelized = false;
+      frameID = 1;
+    }
 
     if (previousParticleRadius != rbfRadius || radiusEdited) {
       particleRecord->rbfRadius = rbfRadius;
