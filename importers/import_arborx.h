@@ -76,7 +76,7 @@ void importArborX(std::string path, std::vector<std::vector<std::pair<uint64_t, 
     }
     #else
     std::cerr << "ARBORX support not compiled into viewer" << std::endl;
-    std::cerr << program;
+    //std::cerr << program;
     std::exit(1);
     #endif
 }
