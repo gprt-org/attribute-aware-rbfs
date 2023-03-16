@@ -408,7 +408,7 @@ int main(int argc, char *argv[])
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.001f * diagonal;
+  float previousParticleRadius = 0.01f * diagonal;
   bool renderAnimation = false;
   do
   {
@@ -445,50 +445,7 @@ int main(int argc, char *argv[])
       }
     }
 
-    if (previousParticleFrame != particleFrame) {    
-      std::cout<<"Num particles "<< particles[particleFrame].size();
-      particleRecord->numParticles = particles[particleFrame].size();
-      particleRecord->rbfRadius = previousParticleRadius;
-      raygenData.numParticles = particles[particleFrame].size();
-      raygenData.rbfRadius = previousParticleRadius;
 
-      // Upload some particles
-      gprtBufferMap(particleBuffer);
-      float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
-      memcpy(particlePositions, particles[particleFrame].data(), sizeof(float4) * particles[particleFrame].size());
-      gprtBufferUnmap(particleBuffer);
-
-      *genRBFBoundsData = *particleRecord;
-      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-      // Generate bounding boxes for those particles
-      // note, unneeded boxes will be inactivated.
-      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
-
-      // Now we can build the tree
-      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
-      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
-      // Assign tree to raygen parameters
-      raygenData.world = gprtAccelGetHandle(world);
-
-      // compute minmax ranges
-      {
-        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
-        *params = raygenData;
-        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-        gprtBufferClear(minMaxVolume);
-        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
-        std::cout << "- Done!" << std::endl;
-      }
-      
-      voxelized = false;
-      majorantsOutOfDate = true;
-      frameID = 1;
-      previousParticleFrame = particleFrame;
-    }
 
     static float rbfRadius = previousParticleRadius;
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
@@ -569,43 +526,6 @@ int main(int argc, char *argv[])
       frameID = 1;
     }
 
-    if (previousParticleRadius != rbfRadius || radiusEdited) {
-      particleRecord->rbfRadius = rbfRadius;
-      raygenData.rbfRadius = rbfRadius;
-      *genRBFBoundsData = *particleRecord;
-      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-      // Regenerate bounding boxes for new radius
-      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
-
-      // Now we can refit the tree
-      gprtAccelUpdate(context, particleAccel);
-      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
-      // Assign tree to raygen parameters
-      raygenData.world = gprtAccelGetHandle(world);
-
-      // compute minmax ranges
-      {
-        std::cout << "Computing minmax ranges" << std::endl;
-        // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
-        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
-        *params = raygenData;
-        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-        // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
-        gprtBufferClear(minMaxVolume);
-        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
-        std::cout << "- Done!" << std::endl;
-      }
-      
-      voxelized = false;
-      majorantsOutOfDate = true;
-      frameID = 1;
-      previousParticleRadius = rbfRadius;
-    }
-
     if (ImGui::Button("Save screenshot"))
     {
       gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
@@ -624,7 +544,7 @@ int main(int argc, char *argv[])
 
     bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
 
-    static int mode = 0;
+    static int mode = 1;
     if (ImGui::RadioButton("Splatting", &mode, 0))
       frameID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
@@ -819,7 +739,6 @@ int main(int argc, char *argv[])
       frameID = 1;
     ImGui::EndFrame();
 
-    raygenData.frameID = frameID;
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
     raygenData.unit = unit;
     raygenData.visualizeAttributes = visualizeAttributes;
@@ -830,9 +749,87 @@ int main(int argc, char *argv[])
     particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
     particleRecord->visualizeAttributes = visualizeAttributes;
 
-    // copy raygen params
-    *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
-    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+    if (previousParticleFrame != particleFrame) {    
+      std::cout<<"Num particles "<< particles[particleFrame].size();
+      particleRecord->numParticles = particles[particleFrame].size();
+      particleRecord->rbfRadius = previousParticleRadius;
+      raygenData.numParticles = particles[particleFrame].size();
+      raygenData.rbfRadius = previousParticleRadius;
+
+      // Upload some particles
+      gprtBufferMap(particleBuffer);
+      float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
+      memcpy(particlePositions, particles[particleFrame].data(), sizeof(float4) * particles[particleFrame].size());
+      gprtBufferUnmap(particleBuffer);
+
+      *genRBFBoundsData = *particleRecord;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+      // Generate bounding boxes for those particles
+      // note, unneeded boxes will be inactivated.
+      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
+
+      // Now we can build the tree
+      gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+      // Assign tree to raygen parameters
+      raygenData.world = gprtAccelGetHandle(world);
+
+      // compute minmax ranges
+      {
+        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        *params = raygenData;
+        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        gprtBufferClear(minMaxVolume);
+        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        std::cout << "- Done!" << std::endl;
+      }
+      
+      voxelized = false;
+      majorantsOutOfDate = true;
+      frameID = 1;
+      previousParticleFrame = particleFrame;
+    }
+
+    if (previousParticleRadius != rbfRadius || radiusEdited) {
+      particleRecord->rbfRadius = rbfRadius;
+      raygenData.rbfRadius = rbfRadius;
+      *genRBFBoundsData = *particleRecord;
+      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+      // Regenerate bounding boxes for new radius
+      gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
+
+      // Now we can refit the tree
+      gprtAccelUpdate(context, particleAccel);
+      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+
+      // Assign tree to raygen parameters
+      raygenData.world = gprtAccelGetHandle(world);
+
+      // compute minmax ranges
+      {
+        std::cout << "Computing minmax ranges" << std::endl;
+        // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
+        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        *params = raygenData;
+        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+
+        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
+        gprtBufferClear(minMaxVolume);
+        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        std::cout << "- Done!" << std::endl;
+      }
+      
+      voxelized = false;
+      majorantsOutOfDate = true;
+      frameID = 1;
+      previousParticleRadius = rbfRadius;
+    }
 
     // if we need to, revoxelize
     if (mode == 2 && !voxelized)
@@ -867,6 +864,12 @@ int main(int argc, char *argv[])
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
+
+    raygenData.frameID = frameID;
+
+    // copy raygen params
+    *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
+    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     switch (mode)
     {

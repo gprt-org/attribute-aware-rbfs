@@ -118,6 +118,9 @@ class ParticleTracker {
           payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f); // note, only square rooting rbg
         }
       }
+      else {
+        continue;
+      }
       if (clampMaxCumulativeValue > 0.f) payload.density /= clampMaxCumulativeValue;
       float4 densityxf = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f);
       float density = pow(densityxf.w, 3);
@@ -443,11 +446,9 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   }
   payload.color.a += color.a;
   
-  if (record.clampMaxCumulativeValue > 0.f) {
-    payload.density = min(payload.density, record.clampMaxCumulativeValue);
-    // if we're visualizing attributes, we need to continue accumulating color
-    if (!record.visualizeAttributes)
-      gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
+  if (record.clampMaxCumulativeValue > 0.f && !record.visualizeAttributes) {
+    payload.density = min(payload.density, record.clampMaxCumulativeValue); 
+    gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
   }
   gprt::ignoreHit(); // forces traversal to continue
 }
