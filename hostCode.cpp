@@ -76,7 +76,7 @@ uint32_t particlesPerLeaf = 16;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
-uint32_t structuredGridResolution = 256;
+uint32_t structuredGridResolution = 64;
 uint32_t ddaGridResolution = 64;
 
 #include <iostream>
@@ -126,6 +126,7 @@ int main(int argc, char *argv[])
     importPoints(pointsPath, particleData);
   else
   {
+    ddaGridResolution = 1;
     particleData.resize(100);
     for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
       particleData[frame].resize(3);

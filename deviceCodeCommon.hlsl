@@ -91,8 +91,8 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   float3 aabbMin = particle.xyz - float3(radius, radius, radius);
   float3 aabbMax = particle.xyz + float3(radius, radius, radius);
 
-  float3 rt = record.globalAABBMax;
-  float3 lb = record.globalAABBMin;
+  float3 rt = record.globalAABBMax + record.rbfRadius;
+  float3 lb = record.globalAABBMin - record.rbfRadius;
   int3 dims = record.volumeDimensions;
 
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
@@ -171,9 +171,9 @@ GPRT_COMPUTE_PROGRAM(AverageRBFBounds, (RayGenData, record), (1,1,1)) {
     float4 color = float4((voxel.xyz / count), voxel.w);
     gprt::store<float4>(record.volume, voxelID, color);
   } else {
-    Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-    SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-    float4 xf = colormap.SampleGrad(sampler, 0.f, 0.f, 0.f);
+    // Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+    // SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
+    float4 xf = float4(0.f, 0.f, 0.f, 0.f);//colormap.SampleGrad(sampler, 0.f, 0.f, 0.f);
     gprt::store<float4>(record.volume, voxelID, xf);
   }
 }
@@ -217,8 +217,8 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
     }
   }
 
-  float3 rt = record.globalAABBMax;
-  float3 lb = record.globalAABBMin;
+  float3 rt = record.globalAABBMax + record.rbfRadius;
+  float3 lb = record.globalAABBMin - record.rbfRadius;
   int3 dims = record.ddaDimensions;
 
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
