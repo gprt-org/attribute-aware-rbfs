@@ -682,7 +682,7 @@ int main(int argc, char *argv[])
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
 
       float3 translation = lookRight * dx + lookUp * -dy;
-      translation = translation * .01f;
+      translation = translation * .001f * diagonal;
 
       lookFrom = lookFrom + translation;
       lookAt = lookAt + translation;
