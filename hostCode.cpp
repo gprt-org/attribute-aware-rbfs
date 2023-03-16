@@ -97,10 +97,7 @@ int main(int argc, char *argv[])
   program.add_argument("--camera")
     .nargs(10)
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
-    .default_value(std::vector<float>{0.f, 0.f, -1.f,
-                                      0.f, 0.f, 0.f,
-                                      0.f, -1.f, 0.f,
-                                      0.66f})
+    .default_value(std::vector<float>{})
     .scan<'g', float>();
 
   try {
@@ -144,12 +141,6 @@ int main(int argc, char *argv[])
     }
   }
 
-  std::vector<float> camParams = program.get<std::vector<float>>("--camera");
-  lookFrom = float3(camParams[0], camParams[1], camParams[2]);
-  lookAt = float3(camParams[3], camParams[4], camParams[5]);
-  lookUp = float3(camParams[6], camParams[7], camParams[8]);
-  cosFovy = camParams[9];
-
   float3 aabb[2] = {
       {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
        std::numeric_limits<float>::max()},
@@ -168,10 +159,19 @@ int main(int argc, char *argv[])
   }
   std::cout << " - Done!" << std::endl;
 
-  // set focus to aabb
-  // lookAt = (aabb[1] + aabb[0]) * .5f;
+  std::vector<float> camParams = program.get<std::vector<float>>("--camera");
 
-  // lookFrom = aabb[1];
+  if (camParams.size() > 0) {
+    lookFrom = float3(camParams[0], camParams[1], camParams[2]);
+    lookAt = float3(camParams[3], camParams[4], camParams[5]);
+    lookUp = float3(camParams[6], camParams[7], camParams[8]);
+    cosFovy = camParams[9];
+  } 
+  else {
+    // set focus to aabb
+    lookAt = (aabb[1] + aabb[0]) * .5f;
+    lookFrom = aabb[1];
+  }  
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -408,7 +408,7 @@ int main(int argc, char *argv[])
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.01f * diagonal;
+  float previousParticleRadius = 0.001f * diagonal;
   bool renderAnimation = false;
   do
   {
