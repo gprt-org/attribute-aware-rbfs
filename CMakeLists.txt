@@ -64,6 +64,7 @@ set(LIBRARIES
 set(COMPILE_DEFINITIONS)
 
 add_executable(viewer hostCode.cpp)
+add_executable(viewer-headless hostCode.cpp)
 
 if (${BUILD_ARBORX})
 set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
@@ -90,3 +91,8 @@ endif()
 
 target_link_libraries(viewer PUBLIC ${LIBRARIES})
 target_compile_definitions(viewer PUBLIC ${COMPILE_DEFINITIONS})
+
+target_link_libraries(viewer-headless PUBLIC ${LIBRARIES})
+target_compile_definitions(viewer-headless PUBLIC ${COMPILE_DEFINITIONS})
+target_compile_definitions(viewer-headless PUBLIC -DHEADLESS)
+target_include_directories(viewer-headless PUBLIC 3rdParty/imgui_gradient/src/) # for embedded color maps

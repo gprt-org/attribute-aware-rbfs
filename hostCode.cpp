@@ -29,8 +29,12 @@
 // our shared data structures between host and device
 #include "sharedCode.h"
 
+#ifdef HEADLESS
+#include <embeddedColorMaps.h>
+#else
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
+#endif
 
 #include <fstream>
 
@@ -223,7 +227,9 @@ int main(int argc, char *argv[])
     }
   }
 
+  #ifndef HEADLESS
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
+  #endif
   gprtRequestRayTypeCount(2);
 
   GPRTContext context = gprtContextCreate();
@@ -276,6 +282,7 @@ int main(int argc, char *argv[])
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   auto accumBuffer =
       gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  #ifndef HEADLESS
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x,
       fbSize.y, 1, false, nullptr);
@@ -283,6 +290,7 @@ int main(int argc, char *argv[])
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y,
       1, false, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
+  #endif
 
   // Colormap for visualization
   auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
@@ -315,7 +323,9 @@ int main(int argc, char *argv[])
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
+  #ifndef HEADLESS
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
+  #endif
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
   raygenData.disableColorCorrection = false;
@@ -388,13 +398,15 @@ int main(int argc, char *argv[])
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
+  #ifndef HEADLESS
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget densitymapWidget{};
   ImGG::GradientWidget radiusmapWidget{};
 
   ImGG::Settings grayscaleWidgetSettings{};
   grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
-  
+  #endif 
+
   bool majorantsOutOfDate = true;
   bool voxelized = false;
   bool firstFrame = true;
@@ -412,11 +424,16 @@ int main(int argc, char *argv[])
   bool renderAnimation = false;
   do
   {
+    #ifndef HEADLESS
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
+    #endif
     
 
     static int particleFrame = 0;
+    #ifdef HEADLESS
+    //
+    #else
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
     if (ImGui::Button("Render Animation")) {
@@ -444,26 +461,37 @@ int main(int argc, char *argv[])
         }
       }
     }
+    #endif
 
 
 
     static float rbfRadius = previousParticleRadius;
+    #ifndef HEADLESS
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
+    #endif
 
     auto make_8bit = [](const float f) -> uint32_t
     {
       return std::min(255, std::max(0, int(f * 256.f)));
     };
-    
+   
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (colormapWidget.widget("Attribute Colormap") || firstFrame)
+    #endif
     {
       gprtTextureMap(colormap);
       uint8_t *ptr = gprtTextureGetPointer(colormap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result;
+        #else
         auto result = colormapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
         ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
         ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
@@ -475,16 +503,24 @@ int main(int argc, char *argv[])
       majorantsOutOfDate = true;
       gprtTextureUnmap(colormap);
     }
-    
+   
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (densitymapWidget.widget("RBF Color") || firstFrame)
+    #endif
     {
       gprtTextureMap(densitymap);
       uint8_t *ptr = gprtTextureGetPointer(densitymap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result;
+        #else
         auto result = densitymapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
         ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
         ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
@@ -499,16 +535,24 @@ int main(int argc, char *argv[])
 
 
     bool radiusEdited = false;
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) || firstFrame)
+    #endif
     {
       radiusEdited = true;
       gprtTextureMap(radiusmap);
       uint8_t *ptr = gprtTextureGetPointer(radiusmap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result;
+        #else
         auto result = radiusmapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
       }
 
@@ -519,6 +563,7 @@ int main(int argc, char *argv[])
     }
 
     static bool disableColorCorrection = false;
+    #ifndef HEADLESS
     if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
       particleRecord->disableColorCorrection = disableColorCorrection;
       raygenData.disableColorCorrection = disableColorCorrection;
@@ -530,27 +575,38 @@ int main(int argc, char *argv[])
     {
       gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
     }
+    #endif
     
 
     static float exposure = 1.f;
     static float gamma = 1.0f;
     static int spp = 1;
+    #ifndef HEADLESS
     ImGui::DragInt("Samples", &spp, 1, 1, 32);
     ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
     ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
+    #endif
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
     raygenData.spp = spp;
 
+    #ifdef HEADLESS
+    bool fovChanged = firstFrame; // TODO
+    #else
     bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
+    #endif
 
     static int mode = 1;
+    #ifdef HEADLESS
+    //
+    #else
     if (ImGui::RadioButton("Splatting", &mode, 0))
       frameID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
       frameID = 1;
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
+    #endif
 
 
 
@@ -606,8 +662,12 @@ int main(int argc, char *argv[])
       if (left_shift) lookUp *= -1.f;
     }
 
+    #ifdef HEADLESS
+    if (fovChanged || firstFrame)
+    #else
     // If we click the mouse, we should rotate the camera
     if (state == GPRT_PRESS && !io.WantCaptureMouse || x_state || y_state || z_state || fovChanged || firstFrame)
+    #endif
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -651,6 +711,7 @@ int main(int argc, char *argv[])
       frameID = 1;
     }
 
+    #ifndef HEADLESS
     if (rstate == GPRT_PRESS && !io.WantCaptureMouse)
     {
       float3 view_vec = lookFrom - lookAt;
@@ -674,7 +735,9 @@ int main(int argc, char *argv[])
 
       frameID = 1;
     }
+    #endif
 
+    #ifndef HEADLESS
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse)
     {
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -705,9 +768,11 @@ int main(int argc, char *argv[])
 
       frameID = 1;
     }
+    #endif
 
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius;
+    #ifndef HEADLESS
     if (ImGui::DragFloat("clamp max cumulative value",
                            &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
     {
@@ -717,20 +782,28 @@ int main(int argc, char *argv[])
     }
     if (ImGui::InputFloat("delta tracking unit value", &unit))
       frameID = 1;
+    #endif
 
     static bool visualizeAttributes = true;
+    #ifdef HEADLESS
+    //
+    #else
     if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes))
     {
       frameID = 1;
       // majorantsOutOfDate = true; // might do this later...
       voxelized = false;
     }
+    #endif
 
     unit = std::max(unit, .001f);
     static float azimuth = 0.f;
     static float elevation = 0.f;
     static float ambient = .5f;
 
+    #ifdef HEADLESS
+    //
+    #else
     if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
       frameID = 1;
     if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
@@ -738,6 +811,7 @@ int main(int argc, char *argv[])
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
       frameID = 1;
     ImGui::EndFrame();
+    #endif
 
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
     raygenData.unit = unit;
@@ -861,9 +935,13 @@ int main(int argc, char *argv[])
       majorantsOutOfDate = false;
     }
 
+    #ifdef HEADLESS
+    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
+    #else
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
+    #endif
 
     gprtBeginProfile(context);
 
@@ -897,12 +975,21 @@ int main(int argc, char *argv[])
     fps << std::setprecision(2);
     fps << (1.0/tavg) << " FPS";
     std::string fpsString = fps.str();
+    #ifdef HEADLESS
+    printf("%s\r\n", fpsString.c_str());
+    #else
     gprtSetWindowTitle(context, fpsString.c_str());
+    #endif
 
     gprtBufferPresent(context, frameBuffer);
 
     frameID ++;;
-  } while (!gprtWindowShouldClose(context));
+  }
+  #ifdef HEADLESS
+  while (0);
+  #else
+  while (!gprtWindowShouldClose(context));
+  #endif
 
   LOG("cleaning up ...");
 
