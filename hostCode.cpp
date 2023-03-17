@@ -467,7 +467,7 @@ int main(int argc, char *argv[])
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
         ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
         ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
-        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(result.w);
       }
 
       frameID = 1;
@@ -488,7 +488,7 @@ int main(int argc, char *argv[])
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
         ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
         ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
-        ptr[i * 4 + 3] = make_8bit(pow(result.w, 1.f / 2.2f));
+        ptr[i * 4 + 3] = make_8bit(result.w);
       }
 
       frameID = 1;
