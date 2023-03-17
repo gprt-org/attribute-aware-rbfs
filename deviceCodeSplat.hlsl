@@ -119,7 +119,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         for (int i = 0; i < payload.tail; ++i) {
           float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma);
+          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma / 2);
           if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
 
           float4 color;
