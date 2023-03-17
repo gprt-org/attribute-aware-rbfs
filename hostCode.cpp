@@ -662,8 +662,10 @@ int main(int argc, char *argv[])
     int x_state = gprtGetKey(context, GPRT_KEY_X);
     int y_state = gprtGetKey(context, GPRT_KEY_Y);
     int z_state = gprtGetKey(context, GPRT_KEY_Z);
-    int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
-    int left_shift = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
+    int ctrl_state  = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
+    int left_shift  = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
+    int right_shift = gprtGetKey(context, GPRT_KEY_RIGHT_SHIFT);
+    int shift = left_shift || right_shift;
 
     // close window on Ctrl-W press
     if (w_state && ctrl_state)
@@ -674,6 +676,14 @@ int main(int argc, char *argv[])
     if (c_state && ctrl_state)
     {
       break;
+    }
+    // Shift-C prints the cam
+    if (c_state && shift)
+    {
+      std::cout << "--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
+                               << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
+                               << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
+                               << cosFovy << '\n';
     }
 
 
