@@ -82,7 +82,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float particlesPerSlab = PARTICLE_BUFFER_SIZE / 8; // just taking this for now
 
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
-  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
@@ -120,16 +119,18 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         for (int i = 0; i < payload.tail; ++i) {
           float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P.xyz, radius);
+          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma);
           if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
 
-          // Idea: parameterize density by both a denisty map and a colormap.
-          // The denstiy map is parameterized on the RBF density.
-          // The colormap density is parameterized by an attribute.
-          float4 color_sample = colormap.SampleGrad(colormapSampler, P.w, 0.f, 0.f);
-          float4 density_sample = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f);
-          float alpha_1msa = ((visualizeAttributes) ? color_sample.w * density_sample.w : density_sample.w) * (1.0 - result_color.a);
-          result_color.rgb += alpha_1msa * ((visualizeAttributes) ? color_sample.rgb : density_sample.rgb);
+          float4 color;
+          if (visualizeAttributes) {
+            color = colormap.SampleGrad(colormapSampler, P.w, 0.f, 0.f);
+            color.w *= drbf;
+          }
+          else color = colormap.SampleGrad(colormapSampler, drbf, 0.f, 0.f);
+           
+          float alpha_1msa = color.a * (1.0 - result_color.a);
+          result_color.rgb += alpha_1msa * color.rgb;
           result_color.a += alpha_1msa;
         }
       }

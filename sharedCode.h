@@ -36,10 +36,11 @@ struct ParticleData {
   alignas(4) uint32_t numParticles;
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
+  alignas(4) float sigma;
+  alignas(4) float power;
   
   // A switch to visualize either RBF density or per-particle attributes
   alignas(4) int visualizeAttributes;
-  alignas(16) gprt::Texture densitymap;
   alignas(16) gprt::Texture colormap;
   alignas(16) gprt::Texture radiusmap;
   alignas(16) gprt::Sampler colormapSampler;
@@ -62,12 +63,13 @@ struct RayGenData {
   alignas(16) float3 globalAABBMax;
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
+  alignas(4) float sigma;
+  alignas(4) float power;
   alignas(16) gprt::Buffer particles;
   alignas(4) uint32_t particlesPerLeaf;
   alignas(4) uint32_t numParticles;
 
   // colormap for visualization
-  alignas(16) gprt::Texture densitymap;
   alignas(16) gprt::Texture colormap;
   alignas(16) gprt::Texture radiusmap;
   alignas(16) gprt::Sampler colormapSampler;
@@ -135,15 +137,8 @@ float3 getLightDirection(float azimuth, float elevation) {
 // P is the particle center
 // X is the intersection point
 // r is the radius of the particle
-float evaluate_rbf(float3 X, float3 P, float r) {
-  return exp(-.5 * pow(distance(X, P), 2.f) / pow(r / 3.f, 2.f));
-}
-
-// d is the squared distance from the particle center to the intersection point
-// r is the radius of the particle
-float evaluate_rbf(float d, float r) {
-  if (d <= 0.f) return 1.f;
-  return exp(-.5 * d / pow(r / 3.f, 2.f));
+float evaluate_rbf(float3 X, float3 P, float r, float sigma) {
+  return exp(-.5 * pow(distance(X, P), 2.f) / pow(r / sigma, 2.f));
 }
 
 float4 over(float4 a, float4 b) {
