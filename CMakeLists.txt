@@ -63,8 +63,8 @@ set(LIBRARIES
 )
 set(COMPILE_DEFINITIONS)
 
-add_executable(viewer hostCode.cpp)
-add_executable(viewer-headless hostCode.cpp)
+add_executable(viewer hostCode.cpp IniFile.cpp)
+add_executable(viewer-headless hostCode.cpp IniFile.cpp)
 
 if (${BUILD_ARBORX})
 set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
