@@ -281,8 +281,6 @@ GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
         // Keep track of the atomic min/max of these two
         gprt::atomicMin32f(record.minMaxVolume, addr * 4 + 2, attributeMin);
         gprt::atomicMax32f(record.minMaxVolume, addr * 4 + 3, attributeMax);
-
-        printf("Splatting %f %f", attributeMin, attributeMax);
       }
     }
   }
