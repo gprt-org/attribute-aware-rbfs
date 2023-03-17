@@ -289,10 +289,6 @@ int main(int argc, char *argv[])
                                                     GPRT_FORMAT_R8G8B8A8_SRGB,
                                                     64, 1, 1, false, nullptr);
 
-  auto densitymap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
-                                                      GPRT_FORMAT_R8G8B8A8_SRGB,
-                                                      64, 1, 1, false, nullptr);
-  
   auto radiusmap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                       GPRT_FORMAT_R8G8B8A8_SRGB,
                                                       64, 1, 1, false, nullptr);
@@ -311,7 +307,6 @@ int main(int argc, char *argv[])
   raygenData.exposure = 1.f;
   raygenData.gamma = 1.0f;
   raygenData.spp = 1;
-  raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
@@ -340,7 +335,6 @@ int main(int argc, char *argv[])
   particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord->particles = gprtBufferGetHandle(particleBuffer);
   particleRecord->colormap = gprtTextureGetHandle(colormap);
-  particleRecord->densitymap = gprtTextureGetHandle(densitymap);
   particleRecord->radiusmap = gprtTextureGetHandle(radiusmap);
   particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
   particleRecord->disableColorCorrection = false;
@@ -389,7 +383,6 @@ int main(int argc, char *argv[])
   gprtBuildShaderBindingTable(context);
 
   ImGG::GradientWidget colormapWidget{};
-  ImGG::GradientWidget densitymapWidget{};
   ImGG::GradientWidget radiusmapWidget{};
 
   ImGG::Settings grayscaleWidgetSettings{};
@@ -475,28 +468,6 @@ int main(int argc, char *argv[])
       majorantsOutOfDate = true;
       gprtTextureUnmap(colormap);
     }
-    
-    if (densitymapWidget.widget("RBF Color") || firstFrame)
-    {
-      gprtTextureMap(densitymap);
-      uint8_t *ptr = gprtTextureGetPointer(densitymap);
-      for (uint32_t i = 0; i < 64; ++i)
-      {
-        auto result = densitymapWidget.gradient().at(
-            ImGG::RelativePosition(i / 63.f)
-        );
-        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
-        ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
-        ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
-        ptr[i * 4 + 3] = make_8bit(result.w);
-      }
-
-      frameID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
-      gprtTextureUnmap(densitymap);
-    }
-
 
     bool radiusEdited = false;
     if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) || firstFrame)
@@ -706,10 +677,18 @@ int main(int argc, char *argv[])
       frameID = 1;
     }
 
+    static float sigma = 3.f;
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius;
     if (ImGui::DragFloat("clamp max cumulative value",
                            &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
+    {
+      frameID = 1;
+      majorantsOutOfDate = true;
+      voxelized = false;
+    }
+    if (ImGui::DragFloat("gaussian sigma",
+                           &sigma, .1f, 0.f, 10.f))
     {
       frameID = 1;
       majorantsOutOfDate = true;
@@ -740,6 +719,7 @@ int main(int argc, char *argv[])
     ImGui::EndFrame();
 
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
+    raygenData.sigma = sigma;
     raygenData.unit = unit;
     raygenData.visualizeAttributes = visualizeAttributes;
     raygenData.light.ambient = ambient;
@@ -747,6 +727,7 @@ int main(int argc, char *argv[])
     raygenData.light.azimuth = azimuth;
 
     particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
+    particleRecord->sigma = sigma;
     particleRecord->visualizeAttributes = visualizeAttributes;
 
     if (previousParticleFrame != particleFrame) {    

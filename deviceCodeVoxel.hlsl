@@ -129,6 +129,7 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
         if (ts >= shadowTExit) break;
         float3 x = shadowRay.Origin + ts * shadowRay.Direction;
         
+        // #define VIS_DDA
         #ifdef VIS_DDA
         // Sample heterogeneous media
         float3 nx = (x - lb) / (rt - lb);
