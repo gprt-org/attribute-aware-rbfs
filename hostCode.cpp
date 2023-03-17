@@ -30,7 +30,8 @@
 #include "sharedCode.h"
 
 #ifdef HEADLESS
-#include <embeddedColorMaps.h>
+#include <embeddedColorMaps.h> // from imgui_gradient/src
+#include "ColorMap.h"
 #else
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
@@ -103,6 +104,31 @@ int main(int argc, char *argv[])
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
     .default_value(std::vector<float>{})
     .scan<'g', float>();
+  
+  #ifdef HEADLESS
+
+  program.add_argument("--colormap")
+    .help("Color map string (see embeddedColorMaps.h)")
+    .default_value("Paraview cool and warm");
+
+  program.add_argument("--densitymap")
+    .help("Density map string (see embeddedColorMaps.h)")
+    .default_value("Paraview cool and warm");
+
+  program.add_argument("--radiusmap")
+    .help("Radius map string (see embeddedColorMaps.h)")
+    .default_value("Paraview cool and warm");
+
+  std::map<std::string, ColorMap> embeddedColorMaps;
+
+  int numMaps = sizeof(EmbeddedColorMaps::maps)/sizeof(EmbeddedColorMaps::maps[0]);
+  for (int i = 0; i < numMaps; ++i) {
+    embeddedColorMaps[EmbeddedColorMaps::names[i]] = ColorMap(EmbeddedColorMaps::maps[i],
+                                                              EmbeddedColorMaps::sizes[i]);
+  }
+  
+  #endif
+  // TODO: might be useful to implement in interactive mode as well?!
 
   try {
     program.parse_args(argc, argv);
@@ -398,7 +424,11 @@ int main(int argc, char *argv[])
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
-  #ifndef HEADLESS
+  #ifdef HEADLESS
+  ColorMap colormapInterpol   = embeddedColorMaps[program.get<std::string>("--colormap")];
+  ColorMap densitymapInterpol = embeddedColorMaps[program.get<std::string>("--densitymap")];
+  ColorMap radiusmapInterpol  = embeddedColorMaps[program.get<std::string>("--radiusmap")];
+  #else
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget densitymapWidget{};
   ImGG::GradientWidget radiusmapWidget{};
@@ -486,7 +516,7 @@ int main(int argc, char *argv[])
       for (uint32_t i = 0; i < 64; ++i)
       {
         #ifdef HEADLESS
-        float4 result;
+        float4 result = colormapInterpol.at(i / 63.f);
         #else
         auto result = colormapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
@@ -515,7 +545,7 @@ int main(int argc, char *argv[])
       for (uint32_t i = 0; i < 64; ++i)
       {
         #ifdef HEADLESS
-        float4 result;
+        float4 result = densitymapInterpol.at(i / 63.f);
         #else
         auto result = densitymapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
@@ -547,7 +577,7 @@ int main(int argc, char *argv[])
       for (uint32_t i = 0; i < 64; ++i)
       {
         #ifdef HEADLESS
-        float4 result;
+        float4 result = radiusmapInterpol.at(i / 63.f);
         #else
         auto result = radiusmapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
