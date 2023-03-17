@@ -975,9 +975,7 @@ int main(int argc, char *argv[])
       majorantsOutOfDate = false;
     }
 
-    #ifdef HEADLESS
-    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
-    #else
+    #ifndef HEADLESS
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
@@ -1017,11 +1015,11 @@ int main(int argc, char *argv[])
     std::string fpsString = fps.str();
     #ifdef HEADLESS
     printf("%s\r\n", fpsString.c_str());
+    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
     #else
     gprtSetWindowTitle(context, fpsString.c_str());
-    #endif
-
     gprtBufferPresent(context, frameBuffer);
+    #endif
 
     frameID ++;;
   }
