@@ -873,12 +873,9 @@ int main(int argc, char *argv[])
     static double tavg = profile;
     tavg = 0.8*tavg + 0.2*profile;
 
-    std::stringstream fps;
-    fps << std::ios::fixed;
-    fps << std::setprecision(2);
-    fps << (1.0/tavg) << " FPS";
-    std::string fpsString = fps.str();
-    gprtSetWindowTitle(context, fpsString.c_str());
+    char title[1000];
+    sprintf(title,"%.2f FPS",(1.0/tavg));
+    gprtSetWindowTitle(context, title);
 
     gprtBufferPresent(context, frameBuffer);
 
