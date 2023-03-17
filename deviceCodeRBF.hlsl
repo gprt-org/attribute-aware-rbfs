@@ -411,16 +411,14 @@ GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
   uint clusterID = PrimitiveIndex();
   uint32_t particlesPerLeaf = record.particlesPerLeaf;
   uint32_t numParticles = record.numParticles;
-  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
   
   for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
     uint32_t primID = clusterID * particlesPerLeaf + i;
     if (primID >= numParticles) break;
     
     float4 particle = gprt::load<float4>(record.particles, primID);
-    float radius = record.rbfRadius;
-    radius *= radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
+    float radius = gprt::load<float>(record.particleRadii, primID);
+
     float3 origin = WorldRayOrigin();
     if (distance(particle.xyz, origin) < radius) {
       RBFAttribute attr;

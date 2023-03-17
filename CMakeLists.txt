@@ -52,11 +52,19 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeVoxel.hlsl
 )
 
+embed_devicecode(
+  OUTPUT_TARGET
+    deviceCodeOptimizeTree
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeOptimizeTree.hlsl
+)
+
 set(LIBRARIES 
   deviceCodeCommon 
   deviceCodeSplat 
   deviceCodeRBF
   deviceCodeVoxel 
+  deviceCodeOptimizeTree 
   gprt::gprt 
   imgui_gradient::imgui_gradient 
   argparse 

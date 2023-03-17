@@ -43,6 +43,7 @@ struct ParticleData {
   alignas(16) gprt::Sampler colormapSampler;
 
   alignas(16) gprt::Buffer particles;
+  alignas(16) gprt::Buffer particleRadii;
   alignas(16) gprt::Buffer aabbs;
 
   alignas(4) int disableColorCorrection;
@@ -61,6 +62,9 @@ struct RayGenData {
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
   alignas(16) gprt::Buffer particles;
+  alignas(16) gprt::Buffer particleRadii;
+  alignas(16) gprt::Buffer newParticleRadii;
+  alignas(16) gprt::Buffer atomicDone;
   alignas(4) uint32_t particlesPerLeaf;
   alignas(4) uint32_t numParticles;
 
@@ -94,6 +98,9 @@ struct RayGenData {
   alignas(4) int showHeatmap;
 
   alignas(4) int disableColorCorrection;
+  
+  /* if optimizing tree s.t. particles overlap with at most K neighbors */
+  alignas(4) int K;
 
   struct {
     alignas(4) float azimuth;

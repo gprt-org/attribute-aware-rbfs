@@ -31,17 +31,24 @@ GPRT_COMPUTE_PROGRAM(GenParticles, (ParticleData, record), (1, 1, 1)) {
   gprt::store<float4>(record.particles, primID, particle);
 }
 
+GPRT_COMPUTE_PROGRAM(GenRBFRadius, (RayGenData, record), (1, 1, 1)) {
+  int primID = DispatchThreadID.x;
+  if (primID >= record.numParticles) return;
+
+  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
+  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
+  
+  float4 particle = gprt::load<float4>(record.particles, primID);
+  float radiusPercent = radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
+  gprt::store<float>(record.particleRadii, primID, record.rbfRadius * radiusPercent);
+}
+
 GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
   uint32_t clusterID = DispatchThreadID.x; 
   uint32_t particlesPerLeaf = record.particlesPerLeaf;
   uint32_t numParticles = record.numParticles;
-  float radius = record.rbfRadius;
-
   float3 clusterAABBMin = float3(1.#INF, 1.#INF, 1.#INF);
   float3 clusterAABBMax = float3(-1.#INF, -1.#INF, -1.#INF);
-  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
-
   const static float NaN = 0.0f / 0.0f;
 
   // need this check since particles per frame can vary
@@ -59,13 +66,11 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
     if (primID >= numParticles) break;
 
     float4 particle = gprt::load<float4>(record.particles, primID);
-    float radiusPercent = radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
+    float radius = gprt::load<float>(record.particleRadii, primID);
+    if (radius <= 0.f) continue;
 
-    // if (clusterID == 0) printf("radiusPercent %f\n", radiusPercent);
-    if (radiusPercent == 0.f) continue;
-
-    float3 aabbMin = particle.xyz - float3(radius, radius, radius) * radiusPercent;
-    float3 aabbMax = particle.xyz + float3(radius, radius, radius) * radiusPercent;
+    float3 aabbMin = particle.xyz - float3(radius, radius, radius);
+    float3 aabbMax = particle.xyz + float3(radius, radius, radius);
     if (i == 0) {
       clusterAABBMin = aabbMin;
       clusterAABBMax = aabbMax;
@@ -87,7 +92,7 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
 GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   int primID = DispatchThreadID.x;
   float4 particle = gprt::load<float4>(record.particles, primID);
-  float radius = record.rbfRadius; // prior work just set this to some global constant.
+  float radius = gprt::load<float>(record.particleRadii, primID);
   float3 aabbMin = particle.xyz - float3(radius, radius, radius);
   float3 aabbMax = particle.xyz + float3(radius, radius, radius);
 
@@ -171,9 +176,7 @@ GPRT_COMPUTE_PROGRAM(AverageRBFBounds, (RayGenData, record), (1,1,1)) {
     float4 color = float4((voxel.xyz / count), voxel.w);
     gprt::store<float4>(record.volume, voxelID, color);
   } else {
-    // Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-    // SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-    float4 xf = float4(0.f, 0.f, 0.f, 0.f);//colormap.SampleGrad(sampler, 0.f, 0.f, 0.f);
+    float4 xf = float4(0.f, 0.f, 0.f, 0.f);
     gprt::store<float4>(record.volume, voxelID, xf);
   }
 }
@@ -183,8 +186,6 @@ GPRT_COMPUTE_PROGRAM(ClearMinMaxGrid, (RayGenData, record), (1,1,1)) {
   // clearing rbf density range to 0,0, since this will ultimately be a sum.
   // clearing attribute density to inf, 0 since there we're taking min/max
   gprt::store<float4>(record.minMaxVolume, voxelID, float4(0.f, 0.f, 1e20f, 0.f));
-
-  // if (voxelID == 0) printf("TEST\n");
 }
 
 GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {

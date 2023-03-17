@@ -77,8 +77,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float tenter, texit;
   bool hit = aabbIntersection(rayDesc, lb, rt, tenter, texit);
 
-  // for now, assuming one global radius.
-  float radius = record.rbfRadius;
   float particlesPerSlab = PARTICLE_BUFFER_SIZE / 8; // just taking this for now
 
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
@@ -90,7 +88,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
   float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
   if (tenter < texit) {
-    const float slab_spacing = particlesPerSlab * radius;
+    const float slab_spacing = particlesPerSlab * record.rbfRadius;
     float tslab = 0.f;
     
     while (tslab < texit) {
@@ -119,8 +117,9 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         // Integrate depth-sorted list of particles
         for (int i = 0; i < payload.tail; ++i) {
           float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
+          float R = gprt::load<float>(record.particleRadii, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P.xyz, radius);
+          float drbf = evaluate_rbf(X, P.xyz, R);
           if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
 
           // Idea: parameterize density by both a denisty map and a colormap.
