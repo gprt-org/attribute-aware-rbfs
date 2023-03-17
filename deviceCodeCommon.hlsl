@@ -174,7 +174,7 @@ GPRT_COMPUTE_PROGRAM(AverageRBFBounds, (RayGenData, record), (1,1,1)) {
     if (clampMaxCumulativeValue > 0.f) voxel.w /= clampMaxCumulativeValue;
     float4 color = float4((voxel.xyz / count), voxel.w);
     if (!record.disableColorCorrection) {
-      color.rgb = pow(color, 1.f / 2.2f);
+      color.rgb = pow(color, 1.f / 2.2f).rgb;
     }
     
     gprt::store<float4>(record.volume, voxelID, color);

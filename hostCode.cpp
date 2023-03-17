@@ -688,7 +688,7 @@ int main(int argc, char *argv[])
       voxelized = false;
     }
     if (ImGui::DragFloat("gaussian sigma",
-                           &sigma, .1f, 0.f, 10.f))
+                           &sigma, 1.f, 0.f, 100.f))
     {
       frameID = 1;
       majorantsOutOfDate = true;

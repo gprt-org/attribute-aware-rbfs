@@ -37,6 +37,7 @@ struct ParticleData {
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
   alignas(4) float sigma;
+  alignas(4) float power;
   
   // A switch to visualize either RBF density or per-particle attributes
   alignas(4) int visualizeAttributes;
@@ -63,6 +64,7 @@ struct RayGenData {
   alignas(4) float rbfRadius;
   alignas(4) float clampMaxCumulativeValue;
   alignas(4) float sigma;
+  alignas(4) float power;
   alignas(16) gprt::Buffer particles;
   alignas(4) uint32_t particlesPerLeaf;
   alignas(4) uint32_t numParticles;
