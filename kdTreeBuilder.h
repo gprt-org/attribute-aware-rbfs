@@ -32,7 +32,11 @@
 #pragma once
 
 #include "accelerationUtils.h"
+#include <iostream>
 #include <vector>
+#include <algorithm>
+#include <memory>
+
 namespace Accelerator{
 
 // KdTreeAccel Declarations
@@ -69,7 +73,7 @@ struct BoundEdge;
 class KdTreeAccel {
   public:
     // KdTreeAccel Public Methods
-    KdTreeAccel(std::vector<std::vector<float4>> particles,
+    KdTreeAccel(std::vector<float4> particles,
                 int isectCost = 80, int traversalCost = 1,
                 float emptyBonus = 0.5, int maxPrims = 1, int maxDepth = -1);
     float2x3 WorldBound() const { return bounds; }
@@ -90,9 +94,9 @@ class KdTreeAccel {
     // KdTreeAccel Private Data
     const int isectCost, traversalCost, maxPrims;
     const float emptyBonus;
-    std::vector<std::vector<float4>> particles;
+    std::vector<float4> particles;
     std::vector<float2> primitiveRanges;
-    float2 globalRange;
+    float2 globalValueRange;
     std::vector<uint32_t> primitiveIndices;
     KdAccelNode *nodes;
     int nAllocatedNodes, nextFreeNode;
@@ -118,6 +122,6 @@ struct KdToDo {
 };
 
 std::shared_ptr<KdTreeAccel> CreateKdTreeAccelerator(
-    std::vector<std::vector<float4>> particles/*, const ParamSet &ps*/);
+    std::vector<float4> particles/*, const ParamSet &ps*/);
 
 } // namespace Accelerator

@@ -35,7 +35,8 @@
 
 #include <algorithm>
 #include "memory.h"
-
+#include <cstring>
+#include <fstream>
 
 namespace Accelerator
 {
@@ -51,6 +52,8 @@ struct BoundEdge {
     EdgeType type;
     float2 majorants; //majorants: above -> upper, below -> lower
 };
+
+
 
 void KdTreeAccel::saveTo(const std::string &fileName) const
 {
@@ -93,7 +96,7 @@ std::shared_ptr<KdTreeAccel> KdTreeAccel::loadFrom(const std::string &fileName)
 void KdTreeAccel::readFrom(std::istream &in)
 {
     size_t magic;
-    umesh::io::readElement(in, magic);
+    //umesh::io::readElement(in, magic);
     if(magic == bum_magic)
     {
         // umesh::io::readElement(in,isectCost);
@@ -165,7 +168,7 @@ bool KdTreeAccel::same(std::shared_ptr<KdTreeAccel> kd1, std::shared_ptr<KdTreeA
             return false;
         }
     }
-    if(kd1->bounds.lower.x != kd2->bounds.lower.x)
+    if(kd1->bounds.row(0).x != kd2->bounds.row(0).x)
         return false;
 
     return true;
@@ -181,18 +184,18 @@ KdTreeAccel::KdTreeAccel(int isectCost, int traversalCost, float emptyBonus,
 }
 
 // KdTreeAccel Method Definitions
-KdTreeAccel::KdTreeAccel(std::vector<std::vector<float4>> particles,
+KdTreeAccel::KdTreeAccel(std::vector<float4> particles,
                          int isectCost, int traversalCost, float emptyBonus,
                          int maxPrims, int maxDepth)
     : isectCost(isectCost),
       traversalCost(traversalCost),
       maxPrims(maxPrims),
       emptyBonus(emptyBonus),
-      umesh_ptr(umesh_ptr) {
+      particles(particles) {
     // Build kd-tree for accelerator
     //ProfilePhase _(Prof::AccelConstruction);
     nextFreeNode = nAllocatedNodes = 0;
-    uint64_t primCount = umesh_ptr->numVolumeElements();//calculateVolumeFaceCount(umesh_ptr);
+    uint64_t primCount = particles.size();
     if (maxDepth <= 0)
         maxDepth = std::round(8 + 1.3f * Log2Int(int64_t(primCount)));
     printf("CALLED: KdTreeAccel, maxDept= %d\n", maxDepth);
@@ -200,36 +203,26 @@ KdTreeAccel::KdTreeAccel(std::vector<std::vector<float4>> particles,
     std::vector<float2x3> primBounds;
     primBounds.reserve(primCount);
 
-    auto primRefs = umesh_ptr->createVolumePrimRefs();
-
-    for (const auto &primRef : primRefs) {
+    for (auto particle : particles) {
         float2x3 b;
         float2 valueRange; 
-        switch (primRef.type)
-        {
-        case umesh::UMesh::PrimType::TET:
-            b = umesh_ptr->getTetBounds(primRef.ID);
-            valueRange = umesh_ptr->getTetValueRange(primRef.ID);
-            break;
-        case umesh::UMesh::PrimType::PYR:
-            b = umesh_ptr->getPyrBounds(primRef.ID);
-            valueRange = umesh_ptr->getPyrValueRange(primRef.ID);
-            break;
-        case umesh::UMesh::PrimType::WEDGE:
-            b = umesh_ptr->getWedgeBounds(primRef.ID);
-            valueRange = umesh_ptr->getWedgeValueRange(primRef.ID);
-            break;
-        case umesh::UMesh::PrimType::HEX:
-            b = umesh_ptr->getHexBounds(primRef.ID);
-            valueRange = umesh_ptr->getHexValueRange(primRef.ID);
-            break;
-        default:
-            break;
-        }
-        bounds.extend(b); 
+        b.row(0) = float3(particle.x, particle.y, particle.z);
+        b.row(1) = float3(particle.x, particle.y, particle.z);
+        valueRange = float2(particle.w, particle.w);
+        
+        bounds = extendedBounds(bounds, b); 
         primBounds.push_back(b);
         primitiveRanges.push_back(valueRange);
-        globalRange.extend(valueRange);
+        globalValueRange = extendedBounds(globalValueRange, valueRange);
+        printf("particle: %f %f %f %f, bounds: %f %f %f %f %f %f, valueRange: %f %f, globalValueRange: %f %f, primBounds: %f %f %f %f %f %f, primitiveRanges: %f %f\n\n",
+            particle.x, particle.y, particle.z, particle.w,
+            bounds.row(0).x, bounds.row(0).y, bounds.row(0).z,
+            bounds.row(1).x, bounds.row(1).y, bounds.row(1).z,
+            valueRange.x, valueRange.y,
+            globalValueRange.x, globalValueRange.y,
+            primBounds[0].row(0).x, primBounds[0].row(0).y, primBounds[0].row(0).z,
+            primBounds[0].row(1).x, primBounds[0].row(1).y, primBounds[0].row(1).z,
+            primitiveRanges[0].x, primitiveRanges[0].y);
     }
     std::cout<<"Done generating bounding boxes. Building tree..."<<std::endl;
 
@@ -251,13 +244,13 @@ KdTreeAccel::KdTreeAccel(std::vector<std::vector<float4>> particles,
 
     for (size_t i = 0; i < nAllocatedNodes; i++)
     {      
-        nodes[i].range.lower = globalRange.lower - 1.0f;
-        nodes[i].range.upper = globalRange.upper + 1.0f;
+        nodes[i].range.x = globalValueRange.x - 1.0f;
+        nodes[i].range.y = globalValueRange.y + 1.0f;
     }
     CalculateMajorants();
     for (size_t i = 0; i < nAllocatedNodes; i++)
     {
-        printf("Range: %f %f \n", nodes[i].range.lower, nodes[i].range.upper);
+        printf("Range: %f %f \n", nodes[i].range.x, nodes[i].range.y);
     }
 }
 
@@ -313,7 +306,7 @@ void KdTreeAccel::buildTree(uint32_t nodeNum, const float2x3 &nodeBounds,
     float oldCost = isectCost * float(nPrimitives);
     float totalSA = SurfaceArea(nodeBounds);
     float invTotalSA = 1 / totalSA;
-    umesh::vec3f d = nodeBounds.upper - nodeBounds.lower;
+    float3 d = nodeBounds.row(1) - nodeBounds.row(0);
 
     // Choose which axis to split along
     int axis = MaximumExtent(nodeBounds);
@@ -324,8 +317,8 @@ retrySplit:
     for (int i = 0; i < nPrimitives; ++i) {
         int pn = primNums[i];
         const float2x3 &bounds = allPrimBounds[pn];
-        edges[axis][2 * i] = BoundEdge(bounds.lower[axis], pn, true);
-        edges[axis][2 * i + 1] = BoundEdge(bounds.upper[axis], pn, false);
+        edges[axis][2 * i] = BoundEdge(bounds.row(0)[axis], pn, true);
+        edges[axis][2 * i + 1] = BoundEdge(bounds.row(1)[axis], pn, false);
     }
 
     // Sort _edges_ for _axis_
@@ -339,19 +332,19 @@ retrySplit:
 
     // We want to compute a split edge depending on majorant. This code computes
     // majorants below and above the split edge for all possible splits. 
-    float majorantBelow = primitiveRanges[edges[axis][0].primNum].upper;
+    float majorantBelow = primitiveRanges[edges[axis][0].primNum].y;
     for (int i = 0; i < 2 * nPrimitives; i++)
     {
-        if( majorantBelow < primitiveRanges[edges[axis][i].primNum].upper)
-            majorantBelow = primitiveRanges[edges[axis][i].primNum].upper;
-        edges[axis][i].majorants.lower = majorantBelow;
+        if( majorantBelow < primitiveRanges[edges[axis][i].primNum].y)
+            majorantBelow = primitiveRanges[edges[axis][i].primNum].y;
+        edges[axis][i].majorants.y = majorantBelow;
     }
-    float majorantAbove = primitiveRanges[edges[axis][2 * nPrimitives - 1].primNum].upper;
+    float majorantAbove = primitiveRanges[edges[axis][2 * nPrimitives - 1].primNum].y;
     for (int i = 2 * nPrimitives - 1; i >= 0; i--)
     {
-        if( majorantAbove < primitiveRanges[edges[axis][i].primNum].upper)
-            majorantAbove = primitiveRanges[edges[axis][i].primNum].upper;
-        edges[axis][i].majorants.upper = majorantAbove;
+        if( majorantAbove < primitiveRanges[edges[axis][i].primNum].y)
+            majorantAbove = primitiveRanges[edges[axis][i].primNum].y;
+        edges[axis][i].majorants.x = majorantAbove;
     }
 
     // Compute cost of all splits for _axis_ to find best
@@ -359,20 +352,20 @@ retrySplit:
     for (int i = 0; i < 2 * nPrimitives; ++i) {
         if (edges[axis][i].type == EdgeType::End) --nAbove;
         float edgeT = edges[axis][i].t;
-        if (edgeT > nodeBounds.lower[axis] && edgeT < nodeBounds.upper[axis]) {
+        if (edgeT > nodeBounds.row(0)[axis] && edgeT < nodeBounds.row(1)[axis]) {
             // Compute cost for split at _i_th edge
 
             // Compute child surface areas for split at _edgeT_
             int otherAxis0 = (axis + 1) % 3, otherAxis1 = (axis + 2) % 3;
             float belowSA = 2 * (d[otherAxis0] * d[otherAxis1] +
-                                 (edgeT - nodeBounds.lower[axis]) *
+                                 (edgeT - nodeBounds.row(0)[axis]) *
                                      (d[otherAxis0] + d[otherAxis1]));
             float aboveSA = 2 * (d[otherAxis0] * d[otherAxis1] +
-                                 (nodeBounds.upper[axis] - edgeT) *
+                                 (nodeBounds.row(1)[axis] - edgeT) *
                                      (d[otherAxis0] + d[otherAxis1]));
             // this code also doesn't make sense, 
-            float pBelow = belowSA * invTotalSA;// * ((edges[axis][i].majorants.lower - globalRange.lower) / (globalRange.upper-globalRange.lower));
-            float pAbove = aboveSA * invTotalSA;// * ((edges[axis][i].majorants.upper - globalRange.lower) / (globalRange.upper-globalRange.lower));
+            float pBelow = belowSA * invTotalSA;// * ((edges[axis][i].majorants.row(0) - globalRange.row(0)) / (globalRange.row(1)-globalRange.row(0)));
+            float pAbove = aboveSA * invTotalSA;// * ((edges[axis][i].majorants.row(1) - globalRange.row(0)) / (globalRange.row(1)-globalRange.row(0)));
             float eb = (nAbove == 0 || nBelow == 0) ? emptyBonus : 0;
             float cost =
                 traversalCost +
@@ -423,7 +416,7 @@ retrySplit:
     // Recursively initialize children nodes
     float tSplit = edges[bestAxis][bestOffset].t;
     float2x3 bounds0 = nodeBounds, bounds1 = nodeBounds;
-    bounds0.upper[bestAxis] = bounds1.lower[bestAxis] = tSplit;
+    bounds0.row(1)[bestAxis] = bounds1.row(0)[bestAxis] = tSplit;
     buildTree(nodeNum + 1, bounds0, allPrimBounds, prims0, n0, depth - 1, edges,
               prims0, prims1 + nPrimitives, badRefines);
     uint32_t aboveChild = nextFreeNode;
@@ -436,32 +429,32 @@ float2 KdTreeAccel::CalculateMajorants(uint32_t nodeIndex)
 {
     auto node = nodes[nodeIndex];
     float2 absoluteRange;
-    if(node.range.lower >= globalRange.lower &&
-        node.range.upper <= globalRange.upper) //prune tree traversal if the values are initialized
+    if(node.range.x >= globalValueRange.x &&
+        node.range.y <= globalValueRange.y) //prune tree traversal if the values are initialized
         return node.range;
     else if(node.IsLeaf() && node.nPrimitives() > 0) //leaf:base case
     {
         if(node.nPrimitives() == 1)
-            absoluteRange.extend(primitiveRanges[node.onePrimitive]);
+            absoluteRange = extendedBounds(absoluteRange, primitiveRanges[node.onePrimitive]);
         else
             for (size_t i = node.primitiveIndicesOffset; 
                     i < node.primitiveIndicesOffset + node.nPrimitives(); i++)
             {
-                absoluteRange.extend(primitiveRanges[primitiveIndices[i]]);
+                absoluteRange = extendedBounds(absoluteRange, primitiveRanges[primitiveIndices[i]]);
             }
     }
     else if(!node.IsLeaf())
     {
         absoluteRange = CalculateMajorants(nodeIndex + 1);
-        absoluteRange.extend(CalculateMajorants(node.AboveChild()));
+        absoluteRange = extendedBounds(absoluteRange, CalculateMajorants(node.AboveChild()));
     }
     else
     {
-        absoluteRange.lower = globalRange.lower;
-        absoluteRange.lower = globalRange.lower;
+        absoluteRange.x = globalValueRange.x;
+        absoluteRange.x= globalValueRange.x;
     }
-    node.range.lower = absoluteRange.lower;
-    node.range.upper = absoluteRange.upper;
+    node.range.x = absoluteRange.x;
+    node.range.y = absoluteRange.y;
     return absoluteRange;
 }
 
@@ -641,7 +634,7 @@ float2 KdTreeAccel::CalculateMajorants(uint32_t nodeIndex)
 // }
 
 std::shared_ptr<KdTreeAccel> CreateKdTreeAccelerator(
-    std::vector<std::vector<float4>> particles) {
+    std::vector<float4> particles) {
     int isectCost = 80;
     int travCost = 1;
     float emptyBonus = 0.5f;

@@ -63,7 +63,7 @@ set(LIBRARIES
 )
 set(COMPILE_DEFINITIONS)
 
-add_executable(viewer hostCode.cpp)
+add_executable(viewer hostCode.cpp kdTreeBuilder.cpp memory.cpp)
 
 if (${BUILD_ARBORX})
 set(LIBRARIES ${LIBRARIES} ArborX::ArborX)

@@ -1,9 +1,9 @@
+#pragma once
 #include <atomic>
 #include <vector>
 
-#pragma once
 
-#include "gprt.h"
+#include <gprt.h>
 
 #ifdef _WIN32
 #define INF INFINITE
@@ -21,7 +21,7 @@
 
 namespace Accelerator {
 
-const size_t bum_magic = 0x111111115ULL;
+const size_t bum_magic = 0x111111115ULL +1;
 
 
 //Some utils owl doesn't have
@@ -143,6 +143,70 @@ inline int MaximumExtent(const float2x3 &b) {
         return 1;
     else
         return 2;
+}
+
+inline float2 extendedBounds(const float2 &b, const float &p)
+{
+    float2 ret;
+    ret.x = linalg::min(b.x, p);
+    ret.y = linalg::max(b.y, p);
+    return ret;
+}
+
+inline float2 extendedBounds(const float2 &b, const float2 &p)
+{
+    float2 ret;
+    auto tmp = linalg::min(b, p);
+    ret.x = linalg::min(tmp.x, tmp.y);
+    tmp = linalg::max(b, p);
+    ret.y = linalg::max(tmp.x, tmp.y);
+    return ret;
+}
+
+inline float2x3 extendedBounds(const float2x3 &b, const float3 &p)
+{
+    float2x3 ret = linalg::mat<float,2,3>({linalg::min(b.row(0).x, p.x),
+        linalg::min(b.row(0).y, p.y)},
+        {linalg::min(b.row(0).z, p.z),
+        linalg::max(b.row(1).x, p.x)},
+        {linalg::max(b.row(1).y, p.y),
+        linalg::max(b.row(1).z, p.z)});
+    return ret;
+}
+
+inline float2x3 extendedBounds(const float2x3 &b, const float2x3 &p)
+{
+    float2x3 ret = linalg::mat<float,2,3>({linalg::min(b.row(0).x, p.row(0).x),
+        linalg::min(b.row(0).y, p.row(0).y)},
+        {linalg::min(b.row(0).z, p.row(0).z),
+        linalg::max(b.row(1).x, p.row(1).x)},
+        {linalg::max(b.row(1).y, p.row(1).y),
+        linalg::max(b.row(1).z, p.row(1).z)});
+    return ret;
+}
+
+inline float2x3 extendedBounds(const float2x3 &b, const float4 &p)
+{
+    float2x3 ret = linalg::mat<float,2,3>({linalg::min(b.row(0).x, p.x),
+        linalg::min(b.row(0).y, p.y)},
+        {linalg::min(b.row(0).z, p.z),
+        linalg::max(b.row(1).x, p.x)},
+        {linalg::max(b.row(1).y, p.y),
+        linalg::max(b.row(1).z, p.z)});
+    return ret;
+}
+
+inline float2x4 extendedBounds(const float2x4 &b, const float4 &p)
+{
+    float2x4 ret = linalg::mat<float,2,4>({linalg::min(b.row(0).x, p.x),
+        linalg::min(b.row(0).y, p.y)},
+        {linalg::min(b.row(0).z, p.z),
+        linalg::min(b.row(0).w, p.w)},
+        {linalg::max(b.row(1).x, p.x),
+        linalg::max(b.row(1).y, p.y)},
+        {linalg::max(b.row(1).z, p.z),
+        linalg::max(b.row(1).w, p.w)});
+    return ret;
 }
 
 // inline int calculateVolumeFaceCount(std::shared_ptr<umesh::UMesh> umesh_ptr) {
