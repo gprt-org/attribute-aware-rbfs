@@ -56,6 +56,7 @@ struct RayGenData {
   alignas(16) gprt::Buffer frameBuffer;
   alignas(16) gprt::Buffer imageBuffer;
   alignas(16) gprt::Buffer accumBuffer;
+  alignas(16) gprt::Buffer stbnBuffer;
   alignas(4) uint32_t frameID;
 
   alignas(16) gprt::Accel world;
@@ -98,6 +99,8 @@ struct RayGenData {
   alignas(4) int showHeatmap;
 
   alignas(4) int disableColorCorrection;
+  
+  alignas(4) int disableBlueNoise;
 
   struct {
     alignas(4) float azimuth;
