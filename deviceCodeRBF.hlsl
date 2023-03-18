@@ -55,6 +55,7 @@ class ParticleTracker {
 
   gprt::Buffer majorants;
   gprt::Texture cmap;
+  gprt::Texture dmap;
   gprt::Sampler cmapSampler; 
   gprt::Accel tree;
 
@@ -80,6 +81,7 @@ class ParticleTracker {
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
+    Texture1D densitymap = gprt::getTexture1DHandle(dmap);
     float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
     float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
 
@@ -129,11 +131,11 @@ class ParticleTracker {
       
       if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
 
-      float density = payload.density;
+      float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
       // allows colormap to hide attributes independent of RBF density
-      if (visualizeAttributes) density *= pow(payload.color.w, 3);
-      else {
+      // if (visualizeAttributes) density *= pow(payload.color.w, 3);
+      if (!visualizeAttributes) {
         float4 densityxf = colormap.SampleGrad(sampler, density, 0.f, 0.f);
         payload.color.rgb = densityxf.rgb;
         density = pow(densityxf.w, 3);
@@ -312,6 +314,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
     tracker.dbg = false;
     tracker.cmap = record.colormap;
+    tracker.dmap = record.densitymap;
     tracker.cmapSampler = record.colormapSampler;
     tracker.tree = record.world;
     tracker.lb = lb;
@@ -456,19 +459,20 @@ GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
 }
 
 GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, payload), (RBFAttribute, hit_particle)) {
-  payload.count += 1;
-  payload.density += hit_particle.density;
   
   SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   float4 color = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f);
+  
+  payload.count += 1;
+  payload.density += hit_particle.density * pow(color.w, 3);
 
   if (record.disableColorCorrection) {
-    payload.color.rgb += color.rgb * hit_particle.density;
+    payload.color.rgb += color.rgb * hit_particle.density * pow(color.w, 3);
   } else {
-    payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density;
+    payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density * pow(color.w, 3);
   }
-  payload.color.a += color.a * hit_particle.density;
+  // payload.color.a += color.a * hit_particle.density;
   
   if (record.clampMaxCumulativeValue > 0.f && !record.visualizeAttributes) {
     payload.density = min(payload.density, record.clampMaxCumulativeValue); 

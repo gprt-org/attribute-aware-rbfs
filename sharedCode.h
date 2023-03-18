@@ -73,6 +73,7 @@ struct RayGenData {
   // colormap for visualization
   alignas(16) gprt::Texture colormap;
   alignas(16) gprt::Texture radiusmap;
+  alignas(16) gprt::Texture densitymap;
   alignas(16) gprt::Sampler colormapSampler;
 
   // In the case that we end up rasterizing our particles

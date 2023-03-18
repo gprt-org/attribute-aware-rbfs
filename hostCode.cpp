@@ -315,6 +315,10 @@ int main(int argc, char *argv[])
   auto radiusmap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                       GPRT_FORMAT_R8G8B8A8_SRGB,
                                                       64, 1, 1, false, nullptr);
+  
+  auto densitymap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
+                                                      GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                      64, 1, 1, false, nullptr);
 
   auto sampler =
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
@@ -333,6 +337,7 @@ int main(int argc, char *argv[])
   raygenData.spp = 1;
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
+  raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
   raygenData.globalAABBMin = aabb[0];
@@ -409,6 +414,7 @@ int main(int argc, char *argv[])
 
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget radiusmapWidget{};
+  ImGG::GradientWidget densitymapWidget{};
 
   ImGG::Settings grayscaleWidgetSettings{};
   grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
@@ -505,13 +511,31 @@ int main(int argc, char *argv[])
         auto result = radiusmapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
-        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
       frameID = 1;
       voxelized = false;
       majorantsOutOfDate = true;
       gprtTextureUnmap(radiusmap);
+    }
+
+    if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) || firstFrame)
+    {
+      gprtTextureMap(densitymap);
+      uint8_t *ptr = gprtTextureGetPointer(densitymap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = densitymapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(result.x);
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(densitymap);
     }
 
     static bool disableColorCorrection = false;
