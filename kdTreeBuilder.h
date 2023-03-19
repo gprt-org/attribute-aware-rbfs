@@ -96,11 +96,11 @@ class KdTreeAccel {
     const float emptyBonus;
     std::vector<float4> particles;
     std::vector<float2> primitiveRanges;
-    float2 globalValueRange;
+    float2 globalValueRange = float2(INF,-INF);
     std::vector<uint32_t> primitiveIndices;
     KdAccelNode *nodes;
     int nAllocatedNodes, nextFreeNode;
-    float2x3 bounds;
+    float2x3 bounds = float2x3(float2(INF,-INF), float2(INF,-INF), float2(INF,-INF));
   private:
     // KdTreeAccel Private Methods
     void writeTo(std::ostream &out) const;

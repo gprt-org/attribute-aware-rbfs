@@ -63,7 +63,9 @@ set(LIBRARIES
 )
 set(COMPILE_DEFINITIONS)
 
-add_executable(viewer hostCode.cpp kdTreeBuilder.cpp memory.cpp)
+add_executable(viewer hostCode.cpp)
+
+add_executable(kdTreeBuiler kdTreeBuilder.cpp memory.cpp)
 
 if (${BUILD_ARBORX})
 set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
@@ -90,3 +92,6 @@ endif()
 
 target_link_libraries(viewer PUBLIC ${LIBRARIES})
 target_compile_definitions(viewer PUBLIC ${COMPILE_DEFINITIONS})
+
+target_link_libraries(kdTreeBuiler PUBLIC ${LIBRARIES})
+target_compile_definitions(kdTreeBuiler PUBLIC ${COMPILE_DEFINITIONS})

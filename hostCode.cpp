@@ -45,7 +45,7 @@
 #include "hilbert.h"
 
 //testing
-#include "kdTreeBuilder.h"
+//#include "kdTreeBuilder.h"
 #include "bvhBuilder.h"
 
 #define LOG(message)                                           \
@@ -229,11 +229,6 @@ int main(int argc, char *argv[])
 
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
   gprtRequestRayTypeCount(2);
-
-  std::vector<float4> kdParticles = particles[0];
-  auto tree = Accelerator::CreateKdTreeAccelerator(kdParticles);
-
-  printf("n of allocated nodes: %d\n", tree->nAllocatedNodes);
 
   GPRTContext context = gprtContextCreate();
   GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);

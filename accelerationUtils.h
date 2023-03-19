@@ -156,55 +156,51 @@ inline float2 extendedBounds(const float2 &b, const float &p)
 inline float2 extendedBounds(const float2 &b, const float2 &p)
 {
     float2 ret;
-    auto tmp = linalg::min(b, p);
-    ret.x = linalg::min(tmp.x, tmp.y);
-    tmp = linalg::max(b, p);
-    ret.y = linalg::max(tmp.x, tmp.y);
+    ret.x = linalg::min(b.x, p.x);
+    ret.y = linalg::max(b.y, p.y);
     return ret;
 }
 
 inline float2x3 extendedBounds(const float2x3 &b, const float3 &p)
 {
-    float2x3 ret = linalg::mat<float,2,3>({linalg::min(b.row(0).x, p.x),
-        linalg::min(b.row(0).y, p.y)},
-        {linalg::min(b.row(0).z, p.z),
+    float2x3 ret = linalg::mat<float,2,3>(
+        {linalg::min(b.row(0).x, p.x),
         linalg::max(b.row(1).x, p.x)},
-        {linalg::max(b.row(1).y, p.y),
+        {linalg::min(b.row(0).y, p.y),
+        linalg::max(b.row(1).y, p.y)},
+        {linalg::min(b.row(0).z, p.z),
         linalg::max(b.row(1).z, p.z)});
+    return ret;
+}
+
+
+inline float2x3 extendedBounds(const float2x3 &b, const float4 &p)
+{
+    float2x3 ret = extendedBounds(b, float3(p.x,p.y,p.z));
     return ret;
 }
 
 inline float2x3 extendedBounds(const float2x3 &b, const float2x3 &p)
 {
     float2x3 ret = linalg::mat<float,2,3>({linalg::min(b.row(0).x, p.row(0).x),
-        linalg::min(b.row(0).y, p.row(0).y)},
-        {linalg::min(b.row(0).z, p.row(0).z),
         linalg::max(b.row(1).x, p.row(1).x)},
-        {linalg::max(b.row(1).y, p.row(1).y),
+        {linalg::min(b.row(0).y, p.row(0).y),
+        linalg::max(b.row(1).y, p.row(1).y)},
+        {linalg::min(b.row(0).z, p.row(0).z),
         linalg::max(b.row(1).z, p.row(1).z)});
-    return ret;
-}
-
-inline float2x3 extendedBounds(const float2x3 &b, const float4 &p)
-{
-    float2x3 ret = linalg::mat<float,2,3>({linalg::min(b.row(0).x, p.x),
-        linalg::min(b.row(0).y, p.y)},
-        {linalg::min(b.row(0).z, p.z),
-        linalg::max(b.row(1).x, p.x)},
-        {linalg::max(b.row(1).y, p.y),
-        linalg::max(b.row(1).z, p.z)});
     return ret;
 }
 
 inline float2x4 extendedBounds(const float2x4 &b, const float4 &p)
 {
-    float2x4 ret = linalg::mat<float,2,4>({linalg::min(b.row(0).x, p.x),
-        linalg::min(b.row(0).y, p.y)},
-        {linalg::min(b.row(0).z, p.z),
-        linalg::min(b.row(0).w, p.w)},
-        {linalg::max(b.row(1).x, p.x),
+    float2x4 ret = linalg::mat<float,2,4>(
+        {linalg::min(b.row(0).x, p.x),
+        linalg::max(b.row(1).x, p.x)},
+        {linalg::min(b.row(0).y, p.y),
         linalg::max(b.row(1).y, p.y)},
-        {linalg::max(b.row(1).z, p.z),
+        {linalg::min(b.row(0).z, p.z),
+        linalg::max(b.row(1).z, p.z)},
+        {linalg::min(b.row(0).w, p.w),
         linalg::max(b.row(1).w, p.w)});
     return ret;
 }
