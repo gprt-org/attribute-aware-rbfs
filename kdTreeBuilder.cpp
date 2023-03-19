@@ -770,7 +770,7 @@ int main(int argc, char *argv[])
 
     //time start
     auto start = std::chrono::high_resolution_clock::now();
-    std::vector<float4> kdParticles = particles[10];
+    std::vector<float4> kdParticles = particles[program.get<int>("--selectTimeStep")];
     auto tree = Accelerator::CreateKdTreeAccelerator(kdParticles, program.get<int>("--maxPrims"));
     //time end
     auto end = std::chrono::high_resolution_clock::now();

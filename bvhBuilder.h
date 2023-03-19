@@ -39,6 +39,7 @@
 
 #include "accelerationUtils.h"
 #include <atomic>
+#include <memory>
 #include "memory.h"
 #include <vector>
 #include  <stack>
@@ -51,7 +52,12 @@ struct BVHBuildNode;
 struct BVHPrimitiveInfo;
 struct MortonPrimitive;
 struct LinearBVHNode {
-    float2x4 bounds;
+    float2x4 bounds = float2x4(
+        {INF, -INF},
+        {INF, -INF},
+        {INF, -INF},
+        {INF, -INF}
+    );
     union {
         int primitivesOffset;   // leaf
         int secondChildOffset;  // interior
@@ -67,7 +73,7 @@ class BVHAccel /*: public Aggregate */{
     enum class SplitMethod { MMH, HLBVH, Middle, EqualCounts };
 
     // BVHAccel Public Methods
-    BVHAccel(std::vector<std::vector<float4>> particles,
+    BVHAccel(std::vector<float4> particles,
              int maxPrimsInNode = 1,
              SplitMethod splitMethod = SplitMethod::MMH);
     float2x4 WorldBound() const;
@@ -116,14 +122,14 @@ public:
     // BVHAccel Private Data
     const int maxPrimsInNode;
     const SplitMethod splitMethod;
-    std::vector<std::vector<float4>> particles;
+    std::vector<float4> particles;
     LinearBVHNode *nodes = nullptr;
     int nAllocatedNodes;
     std::vector<float2> primitiveRanges;
-    float2 globalRange;
+    float2 globalRange = float2(INF, -INF);
 };
 
 std::shared_ptr<BVHAccel> CreateBVHAccelerator(
-    std::vector<std::vector<float4>> particles/*, const ParamSet &ps*/);
+    std::vector<float4> particles, int maxPrimsInNode);
 
 } // namespace Accelerator
