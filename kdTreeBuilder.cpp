@@ -193,8 +193,7 @@ namespace Accelerator
         : isectCost(isectCost),
           traversalCost(traversalCost),
           maxPrims(maxPrims),
-          emptyBonus(emptyBonus),
-          particles(particles)
+          emptyBonus(emptyBonus)
     {
         // Build kd-tree for accelerator
         // ProfilePhase _(Prof::AccelConstruction);

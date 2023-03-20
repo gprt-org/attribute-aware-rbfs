@@ -239,8 +239,7 @@ namespace Accelerator
     BVHAccel::BVHAccel(std::vector<float4> particles,
                        int maxPrimsInNode, SplitMethod splitMethod)
         : maxPrimsInNode(/*std::min*/ (/*255,*/ maxPrimsInNode)),
-          splitMethod(splitMethod),
-          particles(particles)
+          splitMethod(splitMethod)
     {
         size_t numPrim = 0;
         // ProfilePhase _(Prof::AccelConstruction);

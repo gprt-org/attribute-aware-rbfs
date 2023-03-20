@@ -94,7 +94,6 @@ class KdTreeAccel {
     // KdTreeAccel Private Data
     const int isectCost, traversalCost, maxPrims;
     const float emptyBonus;
-    std::vector<float4> particles;
     std::vector<float2> primitiveRanges;
     float2 globalValueRange = float2(INF,-INF);
     std::vector<uint32_t> primitiveIndices;

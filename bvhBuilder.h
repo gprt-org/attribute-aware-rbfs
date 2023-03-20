@@ -122,7 +122,7 @@ public:
     // BVHAccel Private Data
     const int maxPrimsInNode;
     const SplitMethod splitMethod;
-    std::vector<float4> particles;
+    //std::vector<float4> particles;
     LinearBVHNode *nodes = nullptr;
     int nAllocatedNodes;
     std::vector<float2> primitiveRanges;
