@@ -26,6 +26,11 @@
 // public GPRT API
 #include <gprt.h>
 
+// stb
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 // our shared data structures between host and device
 #include "sharedCode.h"
 
@@ -85,10 +90,6 @@ size_t maxNumParticles;
 uint32_t structuredGridResolution = 64;
 uint32_t ddaGridResolution = 64;
 
-#define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb/stb_image.h"
-
 #include <iostream>
 int main(int argc, char *argv[])
 {
@@ -118,6 +119,10 @@ int main(int argc, char *argv[])
 
   program.add_argument("--radiusmap")
     .help("Radius map string (see embeddedColorMaps.h)")
+    .default_value("Paraview cool and warm");
+
+  program.add_argument("--densitymap")
+    .help("Density map string (see embeddedColorMaps.h)")
     .default_value("Paraview cool and warm");
 
   std::map<std::string, ColorMap> embeddedColorMaps;
@@ -453,6 +458,7 @@ int main(int argc, char *argv[])
   #ifdef HEADLESS
   ColorMap colormapInterpol   = embeddedColorMaps[program.get<std::string>("--colormap")];
   ColorMap radiusmapInterpol  = embeddedColorMaps[program.get<std::string>("--radiusmap")];
+  ColorMap densitymapInterpol = embeddedColorMaps[program.get<std::string>("--densitymap")];
   #else
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget radiusmapWidget{};
@@ -588,15 +594,23 @@ int main(int argc, char *argv[])
       gprtTextureUnmap(radiusmap);
     }
 
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) || firstFrame)
+    #endif
     {
       gprtTextureMap(densitymap);
       uint8_t *ptr = gprtTextureGetPointer(densitymap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result = densitymapInterpol.at(i / 63.f);
+        #else
         auto result = densitymapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 

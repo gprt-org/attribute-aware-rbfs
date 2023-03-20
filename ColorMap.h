@@ -2,8 +2,9 @@
 #include <stdint.h>
 #include <stdexcept>
 #include <vector>
-#define STB_IMAGE_IMPLEMENTATION
-#include <stb/stb_image.h>
+// stb already defined by hostCode.cpp
+// #define STB_IMAGE_IMPLEMENTATION
+// #include <stb/stb_image.h>
 #include "sharedCode.h"
 
 struct ColorMap {
