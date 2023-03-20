@@ -61,15 +61,10 @@ namespace Accelerator
     struct BVHPrimitiveInfo
     {
         BVHPrimitiveInfo() {}
-        BVHPrimitiveInfo(size_t primitiveNumber, const float2x3 &bounds)
+        BVHPrimitiveInfo(size_t primitiveNumber, const float3 &particle)
             : primitiveNumber(primitiveNumber),
-              bounds(bounds),
-              centroid(.5f * bounds.row(0) + .5f * bounds.row(1)) {}
+              centroid(particle) {}
         size_t primitiveNumber;
-        float2x3 bounds = float2x3(
-            {INF, -INF},
-            {INF, -INF},
-            {INF, -INF});
         float3 centroid;
     };
 
@@ -253,13 +248,13 @@ namespace Accelerator
         int i = 0;
         for (const auto &particle : particles)
         {
-            float2x3 b = float2x3(
-                float2(particle.x, particle.x),
-                float2(particle.y, particle.y),
-                float2(particle.z, particle.z));
+            // float2x3 b = float2x3(
+            //     float2(particle.x, particle.x),
+            //     float2(particle.y, particle.y),
+            //     float2(particle.z, particle.z));
             float2 valueRange = float2(particle.w, particle.w);
 
-            primitiveInfo[i] = {size_t(i), b};
+            primitiveInfo[i] = {size_t(i), particle.xyz()};
             i = i + 1;
             primitiveRanges.push_back(valueRange);
             globalRange = extendedBounds(globalRange, valueRange);
@@ -349,7 +344,7 @@ namespace Accelerator
             {INF, -INF},
             {INF, -INF});
         for (int i = start; i < end; ++i)
-            bounds = extendedBounds(bounds, primitiveInfo[i].bounds);
+            bounds = extendedBounds(bounds, primitiveInfo[i].centroid);
         int nPrimitives = end - start;
         if (nPrimitives == 1)
         {
@@ -459,7 +454,7 @@ namespace Accelerator
                             /*CHECK_GE(b, 0);
                             CHECK_LT(b, nBuckets);*/
                             buckets[b].count++;
-                            buckets[b].bounds = extendedBounds(buckets[b].bounds, primitiveInfo[i].bounds);
+                            buckets[b].bounds = extendedBounds(buckets[b].bounds, primitiveInfo[i].centroid);
                             buckets[b].primitiveRange = extendedBounds(buckets[b].primitiveRange, primitiveRanges[primitiveInfo[i].primitiveNumber]);
                         }
 
@@ -673,7 +668,7 @@ namespace Accelerator
             {
                 int primitiveIndex = mortonPrims[i].primitiveIndex;
                 orderedPrimRanges[firstPrimOffset + i] = primitiveRanges[primitiveIndex];
-                bounds = extendedBounds(bounds, primitiveInfo[primitiveIndex].bounds);
+                bounds = extendedBounds(bounds, primitiveInfo[primitiveIndex].centroid);
             }
             node->InitLeaf(firstPrimOffset, nPrimitives, bounds);
             return node;
