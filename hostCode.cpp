@@ -85,6 +85,10 @@ size_t maxNumParticles;
 uint32_t structuredGridResolution = 64;
 uint32_t ddaGridResolution = 64;
 
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 #include <iostream>
 int main(int argc, char *argv[])
 {
@@ -319,12 +323,35 @@ int main(int argc, char *argv[])
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
   #endif
 
+  // Blue noise
+  std::vector<GPRTTextureOf<stbi_uc>> stbn(64);
+  std::vector<gprt::Texture> stbnHandles(64);
+  for (uint32_t i = 0; i < 64; ++i) {
+    std::string path = "";
+    path += STBN_DIR;
+    path += "stbn_vec3_2Dx1D_128x128x64_";
+    path += std::to_string(i);
+    path += ".png";
+    int texWidth, texHeight, texChannels;
+    stbi_uc *pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+
+    stbn[i] = gprtDeviceTextureCreate<stbi_uc>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, /*depth*/ 1,
+      /* generate mipmaps */ true, pixels);
+    stbnHandles[i] = gprtTextureGetHandle(stbn[i]);
+  }
+  auto stbnBuffer = gprtDeviceBufferCreate<gprt::Texture>(context, 64, stbnHandles.data());
+
   // Colormap for visualization
   auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                     GPRT_FORMAT_R8G8B8A8_SRGB,
                                                     64, 1, 1, false, nullptr);
 
   auto radiusmap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
+                                                      GPRT_FORMAT_R8G8B8A8_SRGB,
+                                                      64, 1, 1, false, nullptr);
+  
+  auto densitymap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                       GPRT_FORMAT_R8G8B8A8_SRGB,
                                                       64, 1, 1, false, nullptr);
 
@@ -339,11 +366,13 @@ int main(int argc, char *argv[])
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
+  raygenData.stbnBuffer = gprtBufferGetHandle(stbnBuffer);
   raygenData.exposure = 1.f;
   raygenData.gamma = 1.0f;
   raygenData.spp = 1;
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
+  raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
   #ifndef HEADLESS
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
@@ -351,6 +380,7 @@ int main(int argc, char *argv[])
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
   raygenData.disableColorCorrection = false;
+  raygenData.disableBlueNoise = false;
   // raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -426,6 +456,7 @@ int main(int argc, char *argv[])
   #else
   ImGG::GradientWidget colormapWidget{};
   ImGG::GradientWidget radiusmapWidget{};
+  ImGG::GradientWidget densitymapWidget{};
 
   ImGG::Settings grayscaleWidgetSettings{};
   grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
@@ -468,11 +499,11 @@ int main(int argc, char *argv[])
 
     if (renderAnimation) {
       std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
-      text += std::to_string(frameID) + " / 4000"; 
+      text += std::to_string(frameID) + " / 2"; 
       ImGui::Text(text.c_str());
 
 
-      if (frameID == 4000) {
+      if (frameID == 2) {
         std::string numberStr = std::to_string(particleFrame);
         auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
         gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
@@ -548,7 +579,7 @@ int main(int argc, char *argv[])
             ImGG::RelativePosition(i / 63.f)
         );
         #endif
-        ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
+        ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
       frameID = 1;
@@ -557,12 +588,37 @@ int main(int argc, char *argv[])
       gprtTextureUnmap(radiusmap);
     }
 
+    if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) || firstFrame)
+    {
+      gprtTextureMap(densitymap);
+      uint8_t *ptr = gprtTextureGetPointer(densitymap);
+      for (uint32_t i = 0; i < 64; ++i)
+      {
+        auto result = densitymapWidget.gradient().at(
+            ImGG::RelativePosition(i / 63.f)
+        );
+        ptr[i * 4 + 0] = make_8bit(result.x);
+      }
+
+      frameID = 1;
+      voxelized = false;
+      majorantsOutOfDate = true;
+      gprtTextureUnmap(densitymap);
+    }
+
     static bool disableColorCorrection = false;
     ini.get_bool("disableColorCorrection", disableColorCorrection);
     #ifndef HEADLESS
     if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
       particleRecord->disableColorCorrection = disableColorCorrection;
       raygenData.disableColorCorrection = disableColorCorrection;
+      voxelized = false;
+      frameID = 1;
+    }
+
+    static bool disableBlueNoise = false;
+    if (ImGui::Checkbox("Disable Blue Noise", &disableBlueNoise)) {
+      raygenData.disableBlueNoise = disableBlueNoise;
       voxelized = false;
       frameID = 1;
     }
