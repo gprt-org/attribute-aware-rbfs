@@ -67,6 +67,7 @@ struct KdAccelNode {
         int nPrims;      // Leaf
         int aboveChild;  // Interior
     };
+    friend class KdTreeAccel;
 };
 
 struct BoundEdge;
@@ -92,8 +93,8 @@ class KdTreeAccel {
     KdTreeAccel(int isectCost = 80, int traversalCost = 1,
                 float emptyBonus = 0.5, int maxPrims = 1, int maxDepth = -1);//just for loading from files
     // KdTreeAccel Private Data
-    const int isectCost, traversalCost, maxPrims;
-    const float emptyBonus;
+    int isectCost, traversalCost, maxPrims;
+    float emptyBonus;
     std::vector<float2> primitiveRanges;
     float2 globalValueRange = float2(INF,-INF);
     std::vector<uint32_t> primitiveIndices;

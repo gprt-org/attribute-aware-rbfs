@@ -62,29 +62,46 @@ namespace Accelerator
     {
         std::ofstream out(fileName, std::ios_base::binary);
         writeTo(out);
+        //close file
+        out.close();
         std::cout << "KD tree accel saved to " << fileName << std::endl;
     }
 
     /*! write - binary - to given (bianry) stream */
     void KdTreeAccel::writeTo(std::ostream &out) const
     {
-        // umesh::io::writeElement(out, bum_magic);
+        out << bum_magic << std::endl;
+        out << isectCost << std::endl;
+        out << traversalCost << std::endl;
+        out << maxPrims << std::endl;
+        out << emptyBonus << std::endl;
 
-        // umesh::io::writeElement(out,isectCost);
-        // umesh::io::writeElement(out, traversalCost);
-        // umesh::io::writeElement(out, maxPrims);
-        // umesh::io::writeElement(out,emptyBonus);
 
-        // umesh::io::writeVector(out, primitiveIndices);
-        // umesh::io::writeVector(out, primitiveRanges);
+        out << primitiveIndices.size() << std::endl;
+        for (auto i : primitiveIndices)
+            out << i << std::endl;
 
-        // umesh::io::writeElement(out, nAllocatedNodes);
-        // umesh::io::writeArray(out, nodes, nAllocatedNodes);
+        out << primitiveRanges.size() << std::endl;
+        for (auto i : primitiveRanges)
+            out << i.x << i.y << std::endl;
+        
+        out << nAllocatedNodes << std::endl;
+        for (int i = 0; i < nAllocatedNodes; i++)
+        {
+            out << nodes[i].split << std::endl;
+            out << nodes[i].range.x << nodes[i].range.y << std::endl;
+            out << nodes[i].aboveChild << std::endl;
+        }
 
-        // umesh::io::writeElement(out, nextFreeNode);
-        // umesh::io::writeElement(out, bounds);
+        out << nAllocatedNodes << std::endl;
+        out << nextFreeNode << std::endl;
 
-        // todo
+        out << bounds.row(0).x << bounds.row(0).y << bounds.row(0).z << std::endl;
+        out << bounds.row(1).x << bounds.row(1).y << bounds.row(1).z << std::endl;
+
+        // printf("maxPrims: %d primIndices[10]: %d, primRanges[10]: %f %f, node[10].split %d node[10].range %f %f node[10].aboveChild %d\n", 
+        //     maxPrims, primitiveIndices[10], primitiveRanges[10].x, primitiveRanges[10].y,
+        //     nodes[10].split, nodes[10].range.x, nodes[10].range.y, nodes[10].aboveChild);
     }
 
     std::shared_ptr<KdTreeAccel> KdTreeAccel::loadFrom(const std::string &fileName)
@@ -92,6 +109,8 @@ namespace Accelerator
         auto kdAcell = std::make_shared<KdTreeAccel>();
         std::ifstream in(fileName, std::ios_base::binary);
         kdAcell->readFrom(in);
+        //close file
+        in.close();
         std::cout << "KD tree accel loaded from " << fileName << std::endl;
         return kdAcell;
     }
@@ -99,24 +118,47 @@ namespace Accelerator
     void KdTreeAccel::readFrom(std::istream &in)
     {
         size_t magic;
-        // umesh::io::readElement(in, magic);
+        in >> magic;
         if (magic == bum_magic)
         {
-            // umesh::io::readElement(in,isectCost);
-            // umesh::io::readElement(in, traversalCost);
-            // umesh::io::readElement(in, maxPrims);
-            // umesh::io::readElement(in,emptyBonus);
+            in >> isectCost;
+            in >> traversalCost;
+            in >> maxPrims;
+            in >> emptyBonus;
 
-            // umesh::io::readVector(in, primitiveIndices);
-            // umesh::io::readVector(in, primitiveRanges);
+            size_t size;
+            in >> size;
+            primitiveIndices.resize(size);
+            for (auto &i : primitiveIndices)
+                in >> i;
 
-            // umesh::io::readElement(in, nAllocatedNodes);
-            // nodes = AllocAligned<KdAccelNode>(nAllocatedNodes);
-            // umesh::io::readArray(in, nodes, nAllocatedNodes);
+            in >> size;
+            primitiveRanges.resize(size);
+            for (auto &i : primitiveRanges)
+                in >> i.x >> i.y;
+            
+            in >> nAllocatedNodes;
+            nodes = AllocAligned<KdAccelNode>(nAllocatedNodes);
+            for (int i = 0; i < nAllocatedNodes; i++)
+            {
+                in >> nodes[i].split;
+                in >> nodes[i].range.x >> nodes[i].range.y;
+                in >> nodes[i].aboveChild;
+            }
 
-            // umesh::io::readElement(in, nextFreeNode);
-            // umesh::io::readElement(in, bounds);
-            // return;
+            in >> nAllocatedNodes;
+            in >> nextFreeNode;
+            float x1, y1, z1, x2, y2, z2;
+            in >> x1 >> y1 >> z1;
+            in >> x2 >> y2 >> z2;
+
+            bounds = float2x3({x1,x2}, {y1,y2}, {z1,z2});
+
+            // printf("maxPrims: %d primIndices[10]: %d, primRanges[10]: %f %f, node[10].split %d node[10].range %f %f node[10].aboveChild %d\n", 
+            // maxPrims, primitiveIndices[10], primitiveRanges[10].x, primitiveRanges[10].y,
+            // nodes[10].split, nodes[10].range.x, nodes[10].range.y, nodes[10].aboveChild);
+
+            return;
         }
         throw std::runtime_error("wrong magic number in kd file ...");
     }
@@ -773,6 +815,9 @@ int main(int argc, char *argv[])
     auto tree = Accelerator::CreateKdTreeAccelerator(kdParticles, program.get<int>("--maxPrims"));
     //time end
     auto end = std::chrono::high_resolution_clock::now();
+
+    // tree->saveTo("./tree.kd");
+    // Accelerator::KdTreeAccel::loadFrom("./tree.kd");
 
     printf("Created Tree with %d nodes in %fs\n", tree->nAllocatedNodes, std::chrono::duration<double>(end - start).count());
 }
