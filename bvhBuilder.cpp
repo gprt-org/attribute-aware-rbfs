@@ -39,6 +39,7 @@
 #include <algorithm>
 #include <limits>
 #include "importers/import_arborx.h"
+#include <fstream>
 // #include "/usr/include/trilinos/Kokkos_Core.hpp"
 
 #include <chrono>
@@ -989,15 +990,40 @@ namespace Accelerator
 
     void BVHAccel::saveTo(const std::string &fileName) const
     {
-        // std::ofstream out(fileName, std::ios_base::binary);
-        // writeTo(out);
-        // std::cout << "BVH accel saved to " << fileName << std::endl;
+        std::ofstream out(fileName, std::ios_base::binary);
+        writeTo(out);
+        out.close();
+        std::cout << "BVH accel saved to " << fileName << std::endl;
     }
 
     /*! write - binary - to given (bianry) stream */
     void BVHAccel::writeTo(std::ostream &out) const
     {
-        // umesh::io::writeElement(out, bum_magic);
+        out << bum_magic << std::endl;
+        out << maxPrimsInNode << std::endl;
+        
+        out << (int)splitMethod << std::endl;
+
+        out << primitiveRanges.size() << std::endl;
+        for (auto &range : primitiveRanges)
+        {
+            out << range.x << range.y << std::endl;
+        }
+
+        out << globalRange.x << globalRange.y << std::endl;
+
+        out << nAllocatedNodes << std::endl;
+        for (int i = 0; i < nAllocatedNodes; i++)
+        {
+            out << nodes[i].bounds.row(0).x << nodes[i].bounds.row(0).y 
+            << nodes[i].bounds.row(0).z << nodes[i].bounds.row(0).w << std::endl;
+            out << nodes[i].bounds.row(1).x << nodes[i].bounds.row(1).y
+            << nodes[i].bounds.row(1).z << nodes[i].bounds.row(1).w << std::endl;
+            out << nodes[i].nPrimitives << std::endl;
+            out << nodes[i].primitivesOffset << std::endl;
+        }
+
+        //umesh::io::writeElement(out, bum_magic);
 
         // umesh::io::writeElement(out,maxPrimsInNode);
         // umesh::io::writeElement(out, splitMethod);
@@ -1012,16 +1038,48 @@ namespace Accelerator
 
     std::shared_ptr<BVHAccel> BVHAccel::loadFrom(const std::string &fileName)
     {
-        // auto bvhAcell = std::make_shared<BVHAccel>();
-        // std::ifstream in(fileName, std::ios_base::binary);
-        // bvhAcell->readFrom(in);
-        // std::cout << "BVH accel loaded from " << fileName << std::endl;
-        // return bvhAcell;
+        auto bvhAcell = std::make_shared<BVHAccel>();
+        std::ifstream in(fileName, std::ios_base::binary);
+        bvhAcell->readFrom(in);
+        in.close();
+        std::cout << "BVH accel loaded from " << fileName << std::endl;
+        return bvhAcell;
     }
 
     void BVHAccel::readFrom(std::istream &in)
     {
-        // size_t magic;
+        size_t magic;
+        in >> magic;
+        if(magic == bum_magic)
+        {
+            in >> maxPrimsInNode;
+            int splitMethodInt;
+            in >> splitMethodInt;
+            splitMethod = (SplitMethod)splitMethodInt;
+
+            size_t nRanges;
+            in >> nRanges;
+            primitiveRanges.resize(nRanges);
+            for (auto &range : primitiveRanges)
+            {
+                in >> range.x >> range.y;
+            }
+
+            in >> globalRange.x >> globalRange.y;
+
+            in >> nAllocatedNodes;
+            nodes = AllocAligned<LinearBVHNode>(nAllocatedNodes);
+            for (int i = 0; i < nAllocatedNodes; i++)
+            {
+                float x1, y1, z1, w1, x2, y2, z2, w2;
+                in >> x1 >> y1 >> z1 >> w1;
+                in >> x2 >> y2 >> z2 >> w2;
+                nodes[i].bounds = float2x4({x1,x2},{y1,y2},{z1,z2}, {w1,w2});
+                in >> nodes[i].nPrimitives;
+                in >> nodes[i].primitivesOffset;
+            }
+            return;
+        }
         // umesh::io::readElement(in, magic);
         // if(magic == bum_magic)
         // {
@@ -1036,7 +1094,7 @@ namespace Accelerator
         //     //printf("Alloc nodes %d\n");
         //     return;
         // }
-        // throw std::runtime_error("wrong magic number in bvh file ...");
+        throw std::runtime_error("wrong magic number in bvh file ...");
     }
 
     std::shared_ptr<BVHAccel> CreateBVHAccelerator(
@@ -1176,6 +1234,9 @@ int main(int argc, char *argv[])
     auto bvh = Accelerator::CreateBVHAccelerator(bvhParticles, program.get<int>("--maxPrims"));
     //time end
     auto end = std::chrono::high_resolution_clock::now();
+
+    bvh->saveTo("potato.bvh");
+    Accelerator::BVHAccel::loadFrom("potato.bvh");
 
     printf("Created BVH with %d nodes in %fs\n", bvh->nAllocatedNodes, std::chrono::duration<double>(end - start).count());
 }

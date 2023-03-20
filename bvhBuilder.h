@@ -43,6 +43,7 @@
 #include "memory.h"
 #include <vector>
 #include  <stack>
+#include <iostream>
 
 namespace Accelerator {
 
@@ -120,8 +121,8 @@ class BVHAccel /*: public Aggregate */{
     void readFrom(std::istream &in);
 public:
     // BVHAccel Private Data
-    const int maxPrimsInNode;
-    const SplitMethod splitMethod;
+    int maxPrimsInNode;
+    SplitMethod splitMethod;
     //std::vector<float4> particles;
     LinearBVHNode *nodes = nullptr;
     int nAllocatedNodes;
