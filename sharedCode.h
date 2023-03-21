@@ -142,7 +142,9 @@ float3 getLightDirection(float azimuth, float elevation) {
 // X is the intersection point
 // r is the radius of the particle
 float evaluate_rbf(float3 X, float3 P, float r, float sigma) {
-  return exp(-.5 * pow(distance(X, P), 2.f) / pow(r / sigma, 2.f));
+  // return exp(-.5 * pow(distance(X, P), 2.f) / pow(r / sigma, 2.f));
+  return exp(-.5 * pow( (distance(X, P) * sigma) / r, 2.f); // / pow(, 2.f));
+
 }
 
 float4 over(float4 a, float4 b) {
