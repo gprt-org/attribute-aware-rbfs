@@ -35,7 +35,6 @@
 #include "sharedCode.h"
 
 #ifdef HEADLESS
-#include <embeddedColorMaps.h> // from imgui_gradient/src
 #include "ColorMap.h"
 #else
 #include "imgui.h"
@@ -90,6 +89,17 @@ size_t maxNumParticles;
 uint32_t structuredGridResolution = 64;
 uint32_t ddaGridResolution = 64;
 
+static std::vector<std::string> string_split(std::string s, char delim) {
+  std::vector<std::string> result;
+  std::istringstream stream(s);
+
+  for (std::string token; std::getline(stream, token, delim); ) {
+    result.push_back(token);
+  }
+
+  return result;
+}
+
 #include <iostream>
 int main(int argc, char *argv[])
 {
@@ -111,31 +121,6 @@ int main(int argc, char *argv[])
     .default_value(std::vector<float>{})
     .scan<'g', float>();
   
-  #ifdef HEADLESS
-
-  program.add_argument("--colormap")
-    .help("Color map string (see embeddedColorMaps.h)")
-    .default_value("Paraview cool and warm");
-
-  program.add_argument("--radiusmap")
-    .help("Radius map string (see embeddedColorMaps.h)")
-    .default_value("Paraview cool and warm");
-
-  program.add_argument("--densitymap")
-    .help("Density map string (see embeddedColorMaps.h)")
-    .default_value("Paraview cool and warm");
-
-  std::map<std::string, ColorMap> embeddedColorMaps;
-
-  int numMaps = sizeof(EmbeddedColorMaps::maps)/sizeof(EmbeddedColorMaps::maps[0]);
-  for (int i = 0; i < numMaps; ++i) {
-    embeddedColorMaps[EmbeddedColorMaps::names[i]] = ColorMap(EmbeddedColorMaps::maps[i],
-                                                              EmbeddedColorMaps::sizes[i]);
-  }
-  
-  #endif
-  // TODO: might be useful to implement in interactive mode as well?!
-
   try {
     program.parse_args(argc, argv);
   }
@@ -455,14 +440,74 @@ int main(int argc, char *argv[])
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
+  std::string cmMarksStr, rmMarksStr, dmMarksStr;
+  ini.get_string("colormap", cmMarksStr);
+  ini.get_string("radiusmap", rmMarksStr);
+  ini.get_string("densitymap", dmMarksStr);
+
+  auto getMarks = [](std::string markStr) {
+    std::vector<std::pair<float,float4>> marks;
+    if (markStr.empty())
+      return marks;
+    markStr = markStr.substr(1,markStr.size()-2); //remove quotes
+    auto s = string_split(markStr,';');
+    for (auto m : s) {
+      float p,x,y,z,w;
+      sscanf(m.c_str(),"%f:{%f,%f,%f,%f}",&p,&x,&y,&z,&w);
+      marks.push_back({p,{x,y,z,w}});
+    }
+    return marks;
+  };
+
+  auto cmMarks=getMarks(cmMarksStr);
+  auto rmMarks=getMarks(rmMarksStr);
+  auto dmMarks=getMarks(dmMarksStr);
+
+  if (cmMarks.empty()) {
+    cmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    cmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+  }
+
+  if (rmMarks.empty()) {
+    rmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    rmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+  }
+
+  if (dmMarks.empty()) {
+    dmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    dmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+  }
+
   #ifdef HEADLESS
-  ColorMap colormapInterpol   = embeddedColorMaps[program.get<std::string>("--colormap")];
-  ColorMap radiusmapInterpol  = embeddedColorMaps[program.get<std::string>("--radiusmap")];
-  ColorMap densitymapInterpol = embeddedColorMaps[program.get<std::string>("--densitymap")];
+  std::sort(cmMarks.begin(),cmMarks.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
+
+  std::sort(rmMarks.begin(),rmMarks.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
+
+  std::sort(dmMarks.begin(),dmMarks.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
+
+  ColorMap colormapInterpol{cmMarks};
+  ColorMap radiusmapInterpol{rmMarks};
+  ColorMap densitymapInterpol{dmMarks};
   #else
-  ImGG::GradientWidget colormapWidget{};
-  ImGG::GradientWidget radiusmapWidget{};
-  ImGG::GradientWidget densitymapWidget{};
+  std::list<ImGG::Mark> cmMarksImGG, rmMarksImGG, dmMarksImGG;
+  for (auto m : cmMarks)
+    cmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
+                                     ImGG::ColorRGBA{m.second.x,m.second.y,m.second.z,m.second.w}));
+
+  for (auto m : rmMarks)
+    rmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
+                                     ImGG::ColorRGBA{m.second.x,m.second.y,m.second.z,m.second.w}));
+
+  for (auto m : dmMarks)
+    dmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
+                                     ImGG::ColorRGBA{m.second.x,m.second.y,m.second.z,m.second.w}));
+
+  ImGG::GradientWidget colormapWidget{cmMarksImGG};
+  ImGG::GradientWidget radiusmapWidget{rmMarksImGG};
+  ImGG::GradientWidget densitymapWidget{dmMarksImGG};
 
   ImGG::Settings grayscaleWidgetSettings{};
   grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
@@ -942,6 +987,27 @@ int main(int argc, char *argv[])
     // Shift-I prints an ini-file for the current program state
     if (i_state && shift)
     {
+      auto marksToString = [](const auto marks) {
+        std::stringstream stream;
+        stream << '\"';
+        size_t i=0;
+        for (auto m : marks) {
+          stream << m.position.get() << ':';
+          stream << '{'
+                 << m.color.x << ',' << m.color.y << ',' << m.color.z << ',' << m.color.w
+                 << '}';
+          if (i < marks.size()-1) stream << ';';
+          i++;
+        }
+        stream << '\"';
+        return stream.str();
+      };
+      #ifndef HEADLESS
+      auto cmMarks = colormapWidget.gradient().get_marks();
+      auto rmMarks = radiusmapWidget.gradient().get_marks();
+      auto dmMarks = densitymapWidget.gradient().get_marks();
+      #endif
+
       std::cout << "\n\n\n\nPut this in $PWD/viewer.ini:\n";
       std::cout << "[RayGenData]\n";
       std::cout << "rbfRadius=" << raygenData.rbfRadius << '\n';
@@ -968,6 +1034,11 @@ int main(int argc, char *argv[])
       std::cout << "color1=" << missData->color1 << '\n';
       std::cout << "\n[Misc.]\n";
       std::cout << "mode=" << mode << '\n';
+      #ifndef HEADLESS
+      std::cout << "colormap=" << marksToString(cmMarks) << '\n';
+      std::cout << "radiusmap=" << marksToString(rmMarks) << '\n';
+      std::cout << "densitymap=" << marksToString(dmMarks) << '\n';
+      #endif
       std::cout << std::flush;
     }
 

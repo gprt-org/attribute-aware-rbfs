@@ -1,4 +1,5 @@
 #pragma once
+#include <iostream>
 #include <stdint.h>
 #include <stdexcept>
 #include <vector>
@@ -31,6 +32,27 @@ struct ColorMap {
     }
 
     stbi_image_free(img_data);
+  }
+
+  ColorMap(const std::vector<std::pair<float,float4>> &controlPoints, int N=1024)
+  {
+    values_.resize(N);
+    for (size_t i=0; i<values_.size(); ++i) {
+      float f=i/float(values_.size()-1);
+      for (size_t j=0; j<controlPoints.size()-1; ++j) {
+        if (controlPoints[j].first <= f && controlPoints[j+1].first >= f) {
+          float f0 = controlPoints[j].first;
+          float4 c0 = controlPoints[j].second;
+          float f1 = controlPoints[j+1].first;
+          float4 c1 = controlPoints[j+1].second;
+
+          float frac=(f-f0)/(f1-f0);
+          values_[i] = c0*(1.f-frac)+c1*frac;
+          //std::cout << j << ',' << values_[i] << '\n';
+          break;
+        }
+      }
+    }
   }
 
   float4 at(float f01)
