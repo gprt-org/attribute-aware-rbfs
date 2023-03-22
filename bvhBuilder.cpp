@@ -53,6 +53,8 @@ namespace Accelerator
     int interiorNodes = 0;
     int leafNodes = 0;
 
+    float particleRadius = 0.0f;
+
     /*STAT_MEMORY_COUNTER("Memory/BVH tree", treeBytes);
     STAT_RATIO("BVH/Primitives per leaf node", totalPrimitives, totalLeafNodes);
     STAT_COUNTER("BVH/Interior nodes", interiorNodes);
@@ -255,9 +257,9 @@ namespace Accelerator
         for (const auto &particle : particles)
         {
             float2x3 b = float2x3(
-                float2(particle.x, particle.x),
-                float2(particle.y, particle.y),
-                float2(particle.z, particle.z));
+                float2(particle.x - particleRadius, particle.x + particleRadius ),
+                float2(particle.y - particleRadius, particle.y + particleRadius ),
+                float2(particle.z - particleRadius, particle.z + particleRadius ));
             float2 valueRange = float2(particle.w, particle.w);
 
             primitiveInfo[i] = {size_t(i), b};
@@ -1160,6 +1162,10 @@ int main(int argc, char *argv[])
         .help("Maximum number of primitives per leaf")
         .default_value(100)
         .scan<'i', int>();
+    program.add_argument("--particleRadius")
+        .help("Particle radius")
+        .default_value(0.0f)
+        .scan<'g', float>();
 
     try
     {
@@ -1234,8 +1240,9 @@ int main(int argc, char *argv[])
     }
 
     //time start
-    auto start = std::chrono::high_resolution_clock::now();
     std::vector<float4> bvhParticles = particles[program.get<int>("--selectTimeStep")];
+    Accelerator::particleRadius = program.get<float>("--particleRadius");
+    auto start = std::chrono::high_resolution_clock::now();
     auto bvh = Accelerator::CreateBVHAccelerator(bvhParticles, program.get<int>("--maxPrims"));
     //time end
     auto end = std::chrono::high_resolution_clock::now();

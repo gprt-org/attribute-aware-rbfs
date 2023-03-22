@@ -39,6 +39,7 @@
 
 namespace Accelerator
 {
+    float particleRadius = 0.0f;
     enum class EdgeType
     {
         Start,
@@ -252,10 +253,11 @@ namespace Accelerator
         {
             float2 valueRange;
             float2x3 b = linalg::mat<float, 2, 3>(
-                float2(particle.x, particle.x),
-                float2(particle.y, particle.y),
-                float2(particle.z, particle.z));
+                float2(particle.x - particleRadius, particle.x + particleRadius),
+                float2(particle.y - particleRadius, particle.y + particleRadius),
+                float2(particle.z - particleRadius, particle.z + particleRadius));
             valueRange = float2(particle.w, particle.w);
+            printf("particle %d: %f %f %f %f | %f %f %f %f\n", b.row(0).x, b.row(0).y, b.row(0).z, valueRange.x, b.row(1).x, b.row(1).y, b.row(1).z, valueRange.y );
 
             bounds = extendedBounds(bounds, float3(particle.x, particle.y, particle.z));
             primBounds.push_back(b);
@@ -736,6 +738,11 @@ int main(int argc, char *argv[])
         .help("Maximum number of primitives per leaf")
         .default_value(100)
         .scan<'i', int>();
+    program.add_argument("--particleRadius")
+        .help("Particle radius")
+        .default_value(0.0f)
+        .scan<'g', float>();
+
 
     try
     {
@@ -810,8 +817,9 @@ int main(int argc, char *argv[])
     }
 
     //time start
-    auto start = std::chrono::high_resolution_clock::now();
     std::vector<float4> kdParticles = particles[program.get<int>("--selectTimeStep")];
+    Accelerator::particleRadius = program.get<float>("--particleRadius");
+    auto start = std::chrono::high_resolution_clock::now();
     auto tree = Accelerator::CreateKdTreeAccelerator(kdParticles, program.get<int>("--maxPrims"));
     //time end
     auto end = std::chrono::high_resolution_clock::now();
