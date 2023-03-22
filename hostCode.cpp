@@ -36,6 +36,7 @@
 
 #ifdef HEADLESS
 #include "ColorMap.h"
+#include "generateFibonacciSphere.h"
 #else
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
@@ -120,7 +121,31 @@ int main(int argc, char *argv[])
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
     .default_value(std::vector<float>{})
     .scan<'g', float>();
-  
+ 
+  #ifdef HEADLESS
+  program.add_argument("--orbit")
+    .help("Number of spherical orbits for benchmark")
+    .default_value(0)
+    .scan<'i', int>();
+
+  program.add_argument("--orbit-center")
+    .nargs(3)
+    .help("Orbit center vector (cx, cy, cz)")
+    .default_value(std::vector{{1e20f,1e20f,1e20f}})
+    .scan<'g', float>();
+
+  program.add_argument("--orbit-up")
+    .nargs(3)
+    .help("Orbit up vector (upx, upy, upz)")
+    .default_value(std::vector{{0.f,1.f,0.f}})
+    .scan<'g', float>();
+
+  program.add_argument("--orbit-radius")
+    .help("Orbit radius")
+    .default_value(-1.f)
+    .scan<'g', float>();
+  #endif
+
   try {
     program.parse_args(argc, argv);
   }
@@ -196,7 +221,39 @@ int main(int argc, char *argv[])
     // set focus to aabb
     lookAt = (aabb[1] + aabb[0]) * .5f;
     lookFrom = aabb[1];
-  }  
+  }
+
+  bool camChanged = camParams.empty();
+
+  #ifdef HEADLESS
+  int orbitCount = program.get<int>("--orbit");
+  std::vector<float> vOrbitCenter = program.get<std::vector<float>>("--orbit-center");
+  std::vector<float> vOrbitUp = program.get<std::vector<float>>("--orbit-up");
+  float orbitRadius = program.get<float>("--orbit-radius");
+  float3 orbitCenter(vOrbitCenter[0], vOrbitCenter[1], vOrbitCenter[2]);
+  float3 orbitUp(vOrbitUp[0], vOrbitUp[1], vOrbitUp[2]);
+
+  std::vector<float3> orbitCameraPositions;
+  size_t currentOrbitPos = 0;
+
+  if (orbitCount != 0) {
+      if (orbitRadius <= 0.f) {
+          orbitRadius = length(aabb[1] - aabb[0]) / 2.f;
+      }
+      std::cout << "orbit radius: " << orbitRadius << "\n";
+      if (orbitCenter == float3(1e20f)) {
+          orbitCenter = (aabb[0] + aabb[1]) / 2.f;
+      }
+      std::cout << "orbit center: " << orbitCenter << "\n";
+      orbitCameraPositions = generate_fibonacci_sphere(orbitCount, orbitRadius);
+
+      std::cout << "starting pos " << orbitCenter + orbitCameraPositions[currentOrbitPos] << "\n";
+
+      lookFrom = lookAt + orbitCameraPositions[currentOrbitPos];
+      lookAt   = orbitCenter;
+      lookUp   = orbitUp;
+  }
+  #endif
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -705,7 +762,7 @@ int main(int argc, char *argv[])
     raygenData.spp = spp;
 
     #ifdef HEADLESS
-    bool fovChanged = firstFrame; // TODO
+    bool fovChanged = firstFrame;
     #else
     bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
     #endif
@@ -833,18 +890,40 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
-      ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
-                                  raygenData.camera.pos.y,
-                                  raygenData.camera.pos.z);
-      ini.get_vec3f("camera.dir_00", raygenData.camera.dir_00.x,
-                                     raygenData.camera.dir_00.y,
-                                     raygenData.camera.dir_00.z);
-      ini.get_vec3f("camera.dir_du", raygenData.camera.dir_du.x,
-                                     raygenData.camera.dir_du.y,
-                                     raygenData.camera.dir_du.z);
-      ini.get_vec3f("camera.dir_dv", raygenData.camera.dir_dv.x,
-                                     raygenData.camera.dir_dv.y,
-                                     raygenData.camera.dir_dv.z);
+      if (camParams.empty()) {
+        #ifdef HEADLESS
+        if (orbitCount == 0) {
+        #endif
+
+        auto error_pos =
+        ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
+                                    raygenData.camera.pos.y,
+                                    raygenData.camera.pos.z);
+        auto error_dir00 =
+        ini.get_vec3f("camera.dir_00", raygenData.camera.dir_00.x,
+                                       raygenData.camera.dir_00.y,
+                                       raygenData.camera.dir_00.z);
+        auto error_dir_du =
+        ini.get_vec3f("camera.dir_du", raygenData.camera.dir_du.x,
+                                       raygenData.camera.dir_du.y,
+                                       raygenData.camera.dir_du.z);
+        auto error_dir_dv =
+        ini.get_vec3f("camera.dir_dv", raygenData.camera.dir_dv.x,
+                                       raygenData.camera.dir_dv.y,
+                                       raygenData.camera.dir_dv.z);
+
+        #ifdef HEADLESS
+        if (error_pos    == IniFile::Ok &&
+            error_dir00  == IniFile::Ok &&
+            error_dir_du == IniFile::Ok &&
+            error_dir_dv == IniFile::Ok)
+          camChanged = false; // don't recompute!
+        #endif
+
+        #ifdef HEADLESS
+        }
+        #endif
+      }
 
       frameID = 1;
     }
@@ -877,7 +956,11 @@ int main(int argc, char *argv[])
 
     #ifndef HEADLESS
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse)
+    #else
+    if (camChanged)
+    #endif
     {
+    std::cout << lookAt << '\n';
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
@@ -903,10 +986,13 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
+     
+      #if HEADLESS
+      camChanged = false;
+      #endif
 
       frameID = 1;
     }
-    #endif
 
     static float sigma = 3.f;
     static float clampMaxCumulativeValue = 1.f;
@@ -1191,11 +1277,30 @@ int main(int argc, char *argv[])
     sprintf(title,"%.2f FPS",(1.0/tavg));
 
     #ifdef HEADLESS
+    char fileName[1000];
+    if (orbitCount > 0)
+      sprintf(fileName,"./screenshot-%i.png",(int)currentOrbitPos);
+    else
+      sprintf(fileName,"./screenshot.png");
     printf("%s\r\n", title);
-    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
+    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
     #else
     gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
+    #endif
+
+    #ifdef HEADLESS
+    if (orbitCount > 0) {
+      ++currentOrbitPos;
+      float3 nextPos = orbitCenter + orbitCameraPositions[currentOrbitPos];
+      nextPos.z = std::abs(nextPos.z);
+      std::cout << "Advance to orbit #" << currentOrbitPos << "\nOrbit pos " << nextPos << "\n";
+
+      lookFrom = nextPos;
+      lookAt   = orbitCenter;
+      lookUp   = orbitUp;
+      camChanged = true;
+    }
     #endif
 
     frameID ++;;
@@ -1205,7 +1310,7 @@ int main(int argc, char *argv[])
     ini.clear();
   }
   #ifdef HEADLESS
-  while (0);
+  while (currentOrbitPos < orbitCount);
   #else
   while (!gprtWindowShouldClose(context));
   #endif
