@@ -261,7 +261,6 @@ int main(int argc, char *argv[])
       lookUp   = orbitUp;
   }
   #endif
-  }  
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -442,6 +441,8 @@ int main(int argc, char *argv[])
   ini.get_vec3f("color0", missData->color0.x, missData->color0.y, missData->color0.z, 0.1f, 0.1f, 0.1f);
   ini.get_vec3f("color1", missData->color1.x, missData->color1.y, missData->color1.z, 0.0f, 0.0f, 0.0f);
 
+  ini.get_uint32("particlesPerLeaf", particlesPerLeaf, 16);
+
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
   auto aabbBuffer =
@@ -603,6 +604,7 @@ int main(int argc, char *argv[])
     
 
     static int particleFrame = 0;
+    ini.get_int32("particleFrame", particleFrame);
 
     #ifdef HEADLESS
     //
@@ -1113,6 +1115,7 @@ int main(int argc, char *argv[])
       std::cout << "clampMaxCumulativeValue=" << raygenData.clampMaxCumulativeValue << '\n';
       std::cout << "sigma=" << raygenData.sigma << '\n';
       std::cout << "power=" << raygenData.power << '\n';
+      std::cout << "particlesPerLeaf=" << raygenData.particlesPerLeaf << '\n';
       std::cout << "ddaDimensions=" << raygenData.ddaDimensions << '\n';
       std::cout << "visualizeAttributes=" << raygenData.visualizeAttributes << '\n';
       std::cout << "useDDA=" << raygenData.useDDA << '\n';
@@ -1132,6 +1135,7 @@ int main(int argc, char *argv[])
       std::cout << "color0=" << missData->color0 << '\n';
       std::cout << "color1=" << missData->color1 << '\n';
       std::cout << "\n[Misc.]\n";
+      std::cout << "particleFrame=" << particleFrame << '\n';
       std::cout << "mode=" << mode << '\n';
       #ifndef HEADLESS
       std::cout << "colormap=" << marksToString(cmMarks) << '\n';
