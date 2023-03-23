@@ -96,6 +96,7 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
   int3 dims = record.volumeDimensions;
 
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   bool visualizeAttributes = record.visualizeAttributes;
@@ -136,10 +137,11 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
         float rbf = evaluate_rbf(pt, particle.xyz, radius, record.sigma);
         // float u = density;
         // if (clampMaxCumulativeValue > 0.f) u /= clampMaxCumulativeValue;
-        float u = (visualizeAttributes) ? particle.w : rbf;
         float4 cxf = colormap.SampleGrad(sampler, particle.w, 0.f, 0.f);
         float3 color = cxf.rgb;
-        float density = (visualizeAttributes) ? cxf.w * rbf : cxf.w;
+        float density = rbf; //densitymap.SampleGrad(sampler, rbf, 0.f, 0.f).r; //rbf; // (visualizeAttributes) ? cxf.w * rbf : cxf.w;
+        // float4 dxf = densitymap.SampleGrad(sampler, rbf, 0.f, 0.f);
+        if (visualizeAttributes) density *= cxf.w;
 
         
         // if (primID == 0) {
@@ -151,6 +153,8 @@ GPRT_COMPUTE_PROGRAM(AccumulateRBFBounds, (RayGenData, record), (1,1,1)) {
         {
           color = pow(color, 2.2f);
         }
+
+        color = color * rbf;
 
         gprt::atomicAdd32f(record.volume, addr * 4 + 0, color.r);
         gprt::atomicAdd32f(record.volume, addr * 4 + 1, color.g);
@@ -170,18 +174,34 @@ GPRT_COMPUTE_PROGRAM(AverageRBFBounds, (RayGenData, record), (1,1,1)) {
   float4 voxel = gprt::load<float4>(record.volume, voxelID);
   float count = gprt::load<float>(record.volumeCount, voxelID);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
+
+  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
+  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
+
   if (count > 0.f) {
+    float4 color;
+    if (record.visualizeAttributes) {
+      color = float4(voxel.xyz / voxel.w, voxel.w);
+    }
+    else {
+      color = float4(voxel.xyz / count, voxel.w);
+    }
+     
     if (clampMaxCumulativeValue > 0.f) voxel.w /= clampMaxCumulativeValue;
-    float4 color = float4((voxel.xyz / count), voxel.w);
     if (!record.disableColorCorrection) {
       color.rgb = pow(color, 1.f / 2.2f).rgb;
     }
+    if (!record.visualizeAttributes) {
+      color.rgb = colormap.SampleGrad(sampler, voxel.w, 0.f, 0.f).rgb;
+    }
+    color.w = densitymap.SampleGrad(sampler, voxel.w, 0.f, 0.f).r;
     
     gprt::store<float4>(record.volume, voxelID, color);
   } else {
     // Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
     // SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-    float4 xf = float4(0.f, 0.f, 0.f, 0.f);//colormap.SampleGrad(sampler, 0.f, 0.f, 0.f);
+    float4 xf = float4(1.f, 1.f, 1.f, 0.f);//colormap.SampleGrad(sampler, 0.f, 0.f, 0.f);
     gprt::store<float4>(record.volume, voxelID, xf);
   }
 }

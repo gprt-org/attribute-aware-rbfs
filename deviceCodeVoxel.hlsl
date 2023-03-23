@@ -169,6 +169,8 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
   float4 finalColor = (1.f / float(frameId)) * color + (float(frameId - 1) / float(frameId)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
+  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
+
   // if (any(pixelID == centerID)) {
   //   finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
   // }

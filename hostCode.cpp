@@ -119,6 +119,7 @@ int main(int argc, char *argv[])
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
   std::string pointsPath = program.get<std::string>("--points");
+  bool synthetic = false;
   if (dbscanPath != "")
     importArborX(dbscanPath, particleData);
   else if (mmpldPath != "")
@@ -127,15 +128,16 @@ int main(int argc, char *argv[])
     importPoints(pointsPath, particleData);
   else
   {
+    synthetic = true;
     ddaGridResolution = 1;
-    particleData.resize(100);
+    particleData.resize(180);
     for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
-      particleData[frame].resize(3);
+      particleData[frame].resize(2);
       for (uint32_t i = 0; i < particleData[frame].size(); ++i)
       {
         float t1 = float(i) / float(particleData[frame].size());
         
-        float t2 = float(frame) / float(particleData.size());
+        float t2 = 2.f * ( float(frame) / float(particleData.size()) );
 
         particleData[frame][i].second = float4(
           (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
@@ -175,6 +177,11 @@ int main(int argc, char *argv[])
     // set focus to aabb
     lookAt = (aabb[1] + aabb[0]) * .5f;
     lookFrom = aabb[1];
+
+    if (synthetic) {
+      lookAt = {0.f, 0.f, -1.f};
+      lookFrom = {0.f, 0.f, 0.f};
+    }
   }  
 
   // Now, we compute hilbert codes per-point
@@ -434,6 +441,7 @@ int main(int argc, char *argv[])
   int previousParticleFrame = -1;
   float previousParticleRadius = 0.001f * diagonal;
   bool renderAnimation = false;
+  static bool disableBlueNoise = false;
   do
   {
     ImGuiIO &io = ImGui::GetIO();
@@ -441,7 +449,7 @@ int main(int argc, char *argv[])
     
 
     static int particleFrame = 0;
-    ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
+    ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1); 
 
     if (ImGui::Button("Render Animation")) {
       renderAnimation = true;
@@ -451,11 +459,15 @@ int main(int argc, char *argv[])
 
     if (renderAnimation) {
       std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
-      text += std::to_string(frameID) + " / 2"; 
+      if (!disableBlueNoise)
+      text += std::to_string(frameID) + " / 64"; 
+      else
+      text += std::to_string(frameID) + " / 256"; 
+
       ImGui::Text(text.c_str());
 
 
-      if (frameID == 2) {
+      if ((!disableBlueNoise && frameID == 64) || frameID == 256) {
         std::string numberStr = std::to_string(particleFrame);
         auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
         gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
@@ -546,7 +558,6 @@ int main(int argc, char *argv[])
       frameID = 1;
     }
 
-    static bool disableBlueNoise = false;
     if (ImGui::Checkbox("Disable Blue Noise", &disableBlueNoise)) {
       raygenData.disableBlueNoise = disableBlueNoise;
       voxelized = false;
@@ -733,7 +744,7 @@ int main(int argc, char *argv[])
       frameID = 1;
     }
 
-    static float sigma = 3.f;
+    static float sigma = 4.f;
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius;
     if (ImGui::DragFloat("clamp max cumulative value",

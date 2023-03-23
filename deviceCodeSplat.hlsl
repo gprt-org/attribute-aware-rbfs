@@ -83,6 +83,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
   RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   int visualizeAttributes = record.visualizeAttributes;
@@ -119,15 +120,19 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         for (int i = 0; i < payload.tail; ++i) {
           float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma / 2);
+          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma);
           if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
 
           float4 color;
           if (visualizeAttributes) {
             color = colormap.SampleGrad(colormapSampler, P.w, 0.f, 0.f);
+            drbf = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).r;
             color.w *= drbf;
           }
-          else color = colormap.SampleGrad(colormapSampler, drbf, 0.f, 0.f);
+          else {
+            color.rgb = colormap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).rgb;
+            color.w = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).r;
+          }
            
           float alpha_1msa = color.a * (1.0 - result_color.a);
           result_color.rgb += alpha_1msa * color.rgb;
@@ -138,10 +143,13 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
     }
   }
 
+  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
   // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f);//(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
 
   result_color = over(result_color, backgroundColor);
+
+  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(result_color));
 
   // if (any(pixelID == centerID))
   //   result_color.rgb = float3(1.f, 1.f, 1.f) - result_color.rgb;
@@ -152,7 +160,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float4 guiColor = guiTexture.SampleGrad(guiSampler, screen, float2(0.f, 0.f), float2(0.f, 0.f));
   result_color = over(guiColor, float4(result_color.r, result_color.g, result_color.b, 1.f));
 
-  const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
   gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(result_color));
 }
 
