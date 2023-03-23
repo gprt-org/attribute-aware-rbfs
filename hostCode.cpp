@@ -144,6 +144,11 @@ int main(int argc, char *argv[])
     .help("Orbit radius")
     .default_value(-1.f)
     .scan<'g', float>();
+
+  program.add_argument("--benchmark")
+    .help("Run in benchmark mode")
+    .default_value(false)
+    .implicit_value(true);
   #endif
 
   try {
@@ -260,6 +265,8 @@ int main(int argc, char *argv[])
       lookAt   = orbitCenter;
       lookUp   = orbitUp;
   }
+
+  bool benchmark = program.get<bool>("--benchmark");
   #endif
 
   // Now, we compute hilbert codes per-point
@@ -595,6 +602,7 @@ int main(int argc, char *argv[])
   float previousParticleRadius = 0.001f * diagonal;
   bool renderAnimation = false;
   static bool disableBlueNoise = false;
+  std::stringstream frameStats;
   do
   {
     #ifndef HEADLESS
@@ -975,7 +983,6 @@ int main(int argc, char *argv[])
     if (camChanged)
     #endif
     {
-    std::cout << lookAt << '\n';
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
       float3 lookRight = cross(lookUp, normalize(pivot - position).xyz());
@@ -1318,6 +1325,19 @@ int main(int argc, char *argv[])
       lookUp   = orbitUp;
       camChanged = true;
     }
+
+    if (benchmark) {
+      static int firstFrame = true;
+      if (firstFrame) {
+        frameStats << "\"orbitID\"; \"frame time (sec.)\"; \"camera string\"\n";
+        firstFrame = false;
+      }
+      frameStats << currentOrbitPos << ';' << profile << ';';
+      frameStats << "\"--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
+                                  << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
+                                  << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
+                                  << cosFovy << "\"\n";
+    }
     #endif
 
     frameID ++;;
@@ -1330,6 +1350,18 @@ int main(int argc, char *argv[])
   while (currentOrbitPos < orbitCount);
   #else
   while (!gprtWindowShouldClose(context));
+  #endif
+
+  #ifdef HEADLESS
+  if (benchmark) {
+    std::cout << "\n\n\n" << frameStats.str();
+    std::ofstream out("benchmark.txt");
+    out << "cmdline:\n";
+    for (int i=0; i<argc; ++i)
+      out << argv[i] << ' ';
+    out << "\n\n";
+    out << frameStats.str();
+  }
   #endif
 
   LOG("cleaning up ...");
