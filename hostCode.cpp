@@ -26,17 +26,27 @@
 // public GPRT API
 #include <gprt.h>
 
+// stb
+#define STB_IMAGE_STATIC
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 // our shared data structures between host and device
 #include "sharedCode.h"
 
+#ifdef HEADLESS
+#include "ColorMap.h"
+#else
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
+#endif
 
 #include <fstream>
 
 #include "importers/import_points.h"
 #include "importers/import_arborx.h"
 #include "importers/import_mmpld.h"
+#include "IniFile.h"
 #include <argparse/argparse.hpp>
 
 // For parallel sorting of points along a hilbert curve
@@ -79,9 +89,16 @@ size_t maxNumParticles;
 uint32_t structuredGridResolution = 64;
 uint32_t ddaGridResolution = 64;
 
-#define STB_IMAGE_STATIC
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb/stb_image.h"
+static std::vector<std::string> string_split(std::string s, char delim) {
+  std::vector<std::string> result;
+  std::istringstream stream(s);
+
+  for (std::string token; std::getline(stream, token, delim); ) {
+    result.push_back(token);
+  }
+
+  return result;
+}
 
 #include <iostream>
 int main(int argc, char *argv[])
@@ -103,7 +120,7 @@ int main(int argc, char *argv[])
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
     .default_value(std::vector<float>{})
     .scan<'g', float>();
-
+  
   try {
     program.parse_args(argc, argv);
   }
@@ -113,6 +130,10 @@ int main(int argc, char *argv[])
     std::cerr << program;
     std::exit(1);
   }
+
+  IniFile ini("viewer.ini");
+  if (ini.good())
+    std::cout << "Found viewer.ini\n";
 
   std::vector<std::vector<std::pair<uint64_t, float4>>> particleData;
 
@@ -234,7 +255,9 @@ int main(int argc, char *argv[])
     }
   }
 
+  #ifndef HEADLESS
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
+  #endif
   gprtRequestRayTypeCount(2);
 
   GPRTContext context = gprtContextCreate();
@@ -287,6 +310,7 @@ int main(int argc, char *argv[])
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   auto accumBuffer =
       gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  #ifndef HEADLESS
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x,
       fbSize.y, 1, false, nullptr);
@@ -294,6 +318,7 @@ int main(int argc, char *argv[])
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y,
       1, false, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
+  #endif
 
   // Blue noise
   std::vector<GPRTTextureOf<stbi_uc>> stbn(64);
@@ -346,7 +371,9 @@ int main(int argc, char *argv[])
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
+  #ifndef HEADLESS
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
+  #endif
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
   raygenData.disableColorCorrection = false;
@@ -354,8 +381,8 @@ int main(int argc, char *argv[])
   // raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
-  missData->color0 = float3(0.1f, 0.1f, 0.1f);
-  missData->color1 = float3(0.0f, 0.0f, 0.0f);
+  ini.get_vec3f("color0", missData->color0.x, missData->color0.y, missData->color0.z, 0.1f, 0.1f, 0.1f);
+  ini.get_vec3f("color1", missData->color1.x, missData->color1.y, missData->color1.z, 0.0f, 0.0f, 0.0f);
 
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
@@ -413,19 +440,86 @@ int main(int argc, char *argv[])
   raygenData.minMaxVolume = gprtBufferGetHandle(minMaxVolume);
   raygenData.majorants = gprtBufferGetHandle(majorantVolume);
   uint3 ddaDimensions = uint3(ddaGridResolution, ddaGridResolution, ddaGridResolution);
+  ini.get_vec3ui("ddaDimensions", ddaDimensions.x, ddaDimensions.y, ddaDimensions.z);
   raygenData.ddaDimensions = ddaDimensions;
 
   // copy raygen params
   *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
   gprtBuildShaderBindingTable(context);
 
-  ImGG::GradientWidget colormapWidget{};
-  ImGG::GradientWidget radiusmapWidget{};
-  ImGG::GradientWidget densitymapWidget{};
+  std::string cmMarksStr, rmMarksStr, dmMarksStr;
+  ini.get_string("colormap", cmMarksStr);
+  ini.get_string("radiusmap", rmMarksStr);
+  ini.get_string("densitymap", dmMarksStr);
+
+  auto getMarks = [](std::string markStr) {
+    std::vector<std::pair<float,float4>> marks;
+    if (markStr.empty())
+      return marks;
+    markStr = markStr.substr(1,markStr.size()-2); //remove quotes
+    auto s = string_split(markStr,';');
+    for (auto m : s) {
+      float p,x,y,z,w;
+      sscanf(m.c_str(),"%f:{%f,%f,%f,%f}",&p,&x,&y,&z,&w);
+      marks.push_back({p,{x,y,z,w}});
+    }
+    return marks;
+  };
+
+  auto cmMarks=getMarks(cmMarksStr);
+  auto rmMarks=getMarks(rmMarksStr);
+  auto dmMarks=getMarks(dmMarksStr);
+
+  if (cmMarks.empty()) {
+    cmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    cmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+  }
+
+  if (rmMarks.empty()) {
+    rmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    rmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+  }
+
+  if (dmMarks.empty()) {
+    dmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    dmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+  }
+
+  #ifdef HEADLESS
+  std::sort(cmMarks.begin(),cmMarks.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
+
+  std::sort(rmMarks.begin(),rmMarks.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
+
+  std::sort(dmMarks.begin(),dmMarks.end(),
+            [](const auto &a, const auto &b) { return a.first < b.first; });
+
+  ColorMap colormapInterpol{cmMarks};
+  ColorMap radiusmapInterpol{rmMarks};
+  ColorMap densitymapInterpol{dmMarks};
+  #else
+  std::list<ImGG::Mark> cmMarksImGG, rmMarksImGG, dmMarksImGG;
+  for (auto m : cmMarks)
+    cmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
+                                     ImGG::ColorRGBA{m.second.x,m.second.y,m.second.z,m.second.w}));
+
+  for (auto m : rmMarks)
+    rmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
+                                     ImGG::ColorRGBA{m.second.x,m.second.y,m.second.z,m.second.w}));
+
+  for (auto m : dmMarks)
+    dmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
+                                     ImGG::ColorRGBA{m.second.x,m.second.y,m.second.z,m.second.w}));
+
+  ImGG::GradientWidget colormapWidget{cmMarksImGG};
+  ImGG::GradientWidget radiusmapWidget{rmMarksImGG};
+  ImGG::GradientWidget densitymapWidget{dmMarksImGG};
 
   ImGG::Settings grayscaleWidgetSettings{};
   grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
-  
+  #endif 
+
   bool majorantsOutOfDate = true;
   bool voxelized = false;
   bool firstFrame = true;
@@ -444,12 +538,18 @@ int main(int argc, char *argv[])
   static bool disableBlueNoise = false;
   do
   {
+    #ifndef HEADLESS
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
+    #endif
     
 
     static int particleFrame = 0;
-    ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1); 
+
+    #ifdef HEADLESS
+    //
+    #else
+    ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
     if (ImGui::Button("Render Animation")) {
       renderAnimation = true;
@@ -480,26 +580,38 @@ int main(int argc, char *argv[])
         }
       }
     }
+    #endif
 
 
 
     static float rbfRadius = previousParticleRadius;
+    ini.get_float("rbfRadius", rbfRadius);
+    #ifndef HEADLESS
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
+    #endif
 
     auto make_8bit = [](const float f) -> uint32_t
     {
       return std::min(255, std::max(0, int(f * 256.f)));
     };
-    
+   
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (colormapWidget.widget("Attribute Colormap") || firstFrame)
+    #endif
     {
       gprtTextureMap(colormap);
       uint8_t *ptr = gprtTextureGetPointer(colormap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result = colormapInterpol.at(i / 63.f);
+        #else
         auto result = colormapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
         ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
         ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
@@ -513,16 +625,24 @@ int main(int argc, char *argv[])
     }
 
     bool radiusEdited = false;
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) || firstFrame)
+    #endif
     {
       radiusEdited = true;
       gprtTextureMap(radiusmap);
       uint8_t *ptr = gprtTextureGetPointer(radiusmap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result = radiusmapInterpol.at(i / 63.f);
+        #else
         auto result = radiusmapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
@@ -532,15 +652,23 @@ int main(int argc, char *argv[])
       gprtTextureUnmap(radiusmap);
     }
 
+    #ifdef HEADLESS
+    if (firstFrame)
+    #else
     if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) || firstFrame)
+    #endif
     {
       gprtTextureMap(densitymap);
       uint8_t *ptr = gprtTextureGetPointer(densitymap);
       for (uint32_t i = 0; i < 64; ++i)
       {
+        #ifdef HEADLESS
+        float4 result = densitymapInterpol.at(i / 63.f);
+        #else
         auto result = densitymapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
+        #endif
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
@@ -551,6 +679,8 @@ int main(int argc, char *argv[])
     }
 
     static bool disableColorCorrection = false;
+    ini.get_bool("disableColorCorrection", disableColorCorrection);
+    #ifndef HEADLESS
     if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
       particleRecord->disableColorCorrection = disableColorCorrection;
       raygenData.disableColorCorrection = disableColorCorrection;
@@ -568,27 +698,42 @@ int main(int argc, char *argv[])
     {
       gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
     }
+    #endif
     
 
     static float exposure = 1.f;
     static float gamma = 1.0f;
     static int spp = 1;
+    ini.get_float("exposure", exposure);
+    ini.get_float("gamma", gamma);
+    ini.get_int32("spp", spp);
+    #ifndef HEADLESS
     ImGui::DragInt("Samples", &spp, 1, 1, 32);
     ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
     ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
+    #endif
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
     raygenData.spp = spp;
 
+    #ifdef HEADLESS
+    bool fovChanged = firstFrame; // TODO
+    #else
     bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
+    #endif
 
     static int mode = 1;
+    ini.get_int32("mode", mode);
+    #ifdef HEADLESS
+    //
+    #else
     if (ImGui::RadioButton("Splatting", &mode, 0))
       frameID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
       frameID = 1;
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       frameID = 1;
+    #endif
 
 
 
@@ -614,8 +759,11 @@ int main(int argc, char *argv[])
     int x_state = gprtGetKey(context, GPRT_KEY_X);
     int y_state = gprtGetKey(context, GPRT_KEY_Y);
     int z_state = gprtGetKey(context, GPRT_KEY_Z);
-    int ctrl_state = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
-    int left_shift = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
+    int i_state = gprtGetKey(context, GPRT_KEY_I);
+    int ctrl_state  = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
+    int left_shift  = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
+    int right_shift = gprtGetKey(context, GPRT_KEY_RIGHT_SHIFT);
+    int shift = left_shift || right_shift;
 
     // close window on Ctrl-W press
     if (w_state && ctrl_state)
@@ -626,6 +774,14 @@ int main(int argc, char *argv[])
     if (c_state && ctrl_state)
     {
       break;
+    }
+    // Shift-C prints the cam
+    if (c_state && shift)
+    {
+      std::cout << "--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
+                               << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
+                               << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
+                               << cosFovy << '\n';
     }
 
 
@@ -644,8 +800,12 @@ int main(int argc, char *argv[])
       if (left_shift) lookUp *= -1.f;
     }
 
+    #ifdef HEADLESS
+    if (fovChanged || firstFrame)
+    #else
     // If we click the mouse, we should rotate the camera
     if (state == GPRT_PRESS && !io.WantCaptureMouse || x_state || y_state || z_state || fovChanged || firstFrame)
+    #endif
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -685,10 +845,23 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
+      ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
+                                  raygenData.camera.pos.y,
+                                  raygenData.camera.pos.z);
+      ini.get_vec3f("camera.dir_00", raygenData.camera.dir_00.x,
+                                     raygenData.camera.dir_00.y,
+                                     raygenData.camera.dir_00.z);
+      ini.get_vec3f("camera.dir_du", raygenData.camera.dir_du.x,
+                                     raygenData.camera.dir_du.y,
+                                     raygenData.camera.dir_du.z);
+      ini.get_vec3f("camera.dir_dv", raygenData.camera.dir_dv.x,
+                                     raygenData.camera.dir_dv.y,
+                                     raygenData.camera.dir_dv.z);
 
       frameID = 1;
     }
 
+    #ifndef HEADLESS
     if (rstate == GPRT_PRESS && !io.WantCaptureMouse)
     {
       float3 view_vec = lookFrom - lookAt;
@@ -712,7 +885,9 @@ int main(int argc, char *argv[])
 
       frameID = 1;
     }
+    #endif
 
+    #ifndef HEADLESS
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse)
     {
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -743,10 +918,15 @@ int main(int argc, char *argv[])
 
       frameID = 1;
     }
+    #endif
 
     static float sigma = 4.f;
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius;
+    ini.get_float("sigma", sigma);
+    ini.get_float("clampMaxCumulativeValue", sigma);
+    ini.get_float("unit", unit);
+    #ifndef HEADLESS
     if (ImGui::DragFloat("clamp max cumulative value",
                            &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
     {
@@ -763,20 +943,30 @@ int main(int argc, char *argv[])
     }
     if (ImGui::InputFloat("delta tracking unit value", &unit))
       frameID = 1;
+    #endif
 
     static bool visualizeAttributes = true;
+    ini.get_bool("visualizeAttributes", visualizeAttributes);
+    #ifndef HEADLESS
     if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes))
     {
       frameID = 1;
       // majorantsOutOfDate = true; // might do this later...
       voxelized = false;
     }
+    #endif
 
     unit = std::max(unit, .001f);
     static float azimuth = 0.f;
     static float elevation = 0.f;
     static float ambient = .5f;
+    ini.get_float("light.azimuth", azimuth);
+    ini.get_float("light.elevation", elevation);
+    ini.get_float("light.ambient", ambient);
 
+    #ifdef HEADLESS
+    //
+    #else
     if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
       frameID = 1;
     if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
@@ -784,11 +974,20 @@ int main(int argc, char *argv[])
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
       frameID = 1;
     ImGui::EndFrame();
+    #endif
+
+    static bool useDDA = true;
+    ini.get_bool("useDDA", useDDA);
+
+    static bool showHeatmap = false;
+    ini.get_bool("showHeatmap", showHeatmap);
 
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
     raygenData.sigma = sigma;
     raygenData.unit = unit;
     raygenData.visualizeAttributes = visualizeAttributes;
+    raygenData.useDDA = useDDA;
+    raygenData.showHeatmap = showHeatmap;
     raygenData.light.ambient = ambient;
     raygenData.light.elevation = elevation;
     raygenData.light.azimuth = azimuth;
@@ -796,6 +995,64 @@ int main(int argc, char *argv[])
     particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
     particleRecord->sigma = sigma;
     particleRecord->visualizeAttributes = visualizeAttributes;
+
+    // Shift-I prints an ini-file for the current program state
+    if (i_state && shift)
+    {
+      auto marksToString = [](const auto marks) {
+        std::stringstream stream;
+        stream << '\"';
+        size_t i=0;
+        for (auto m : marks) {
+          stream << m.position.get() << ':';
+          stream << '{'
+                 << m.color.x << ',' << m.color.y << ',' << m.color.z << ',' << m.color.w
+                 << '}';
+          if (i < marks.size()-1) stream << ';';
+          i++;
+        }
+        stream << '\"';
+        return stream.str();
+      };
+      #ifndef HEADLESS
+      auto cmMarks = colormapWidget.gradient().get_marks();
+      auto rmMarks = radiusmapWidget.gradient().get_marks();
+      auto dmMarks = densitymapWidget.gradient().get_marks();
+      #endif
+
+      std::cout << "\n\n\n\nPut this in $PWD/viewer.ini:\n";
+      std::cout << "[RayGenData]\n";
+      std::cout << "rbfRadius=" << raygenData.rbfRadius << '\n';
+      std::cout << "clampMaxCumulativeValue=" << raygenData.clampMaxCumulativeValue << '\n';
+      std::cout << "sigma=" << raygenData.sigma << '\n';
+      std::cout << "power=" << raygenData.power << '\n';
+      std::cout << "ddaDimensions=" << raygenData.ddaDimensions << '\n';
+      std::cout << "visualizeAttributes=" << raygenData.visualizeAttributes << '\n';
+      std::cout << "useDDA=" << raygenData.useDDA << '\n';
+      std::cout << "showHeatmap=" << raygenData.showHeatmap << '\n';
+      std::cout << "disableColorCorrection=" << raygenData.disableColorCorrection << '\n';
+      std::cout << "light.azimuth=" << raygenData.light.azimuth << '\n';
+      std::cout << "light.elevation=" << raygenData.light.elevation << '\n';
+      std::cout << "light.ambient=" << raygenData.light.ambient << '\n';
+      std::cout << "camera.pos=" << raygenData.camera.pos << '\n';
+      std::cout << "camera.dir_00=" << raygenData.camera.dir_00 << '\n';
+      std::cout << "camera.dir_du=" << raygenData.camera.dir_du << '\n';
+      std::cout << "camera.dir_dv=" << raygenData.camera.dir_dv << '\n';
+      std::cout << "spp=" << raygenData.spp << '\n';
+      std::cout << "exposure=" << raygenData.exposure << '\n';
+      std::cout << "gamma=" << raygenData.gamma << '\n';
+      std::cout << "\n[MissProgData]\n";
+      std::cout << "color0=" << missData->color0 << '\n';
+      std::cout << "color1=" << missData->color1 << '\n';
+      std::cout << "\n[Misc.]\n";
+      std::cout << "mode=" << mode << '\n';
+      #ifndef HEADLESS
+      std::cout << "colormap=" << marksToString(cmMarks) << '\n';
+      std::cout << "radiusmap=" << marksToString(rmMarks) << '\n';
+      std::cout << "densitymap=" << marksToString(dmMarks) << '\n';
+      #endif
+      std::cout << std::flush;
+    }
 
     if (previousParticleFrame != particleFrame) {    
       std::cout<<"Num particles "<< particles[particleFrame].size();
@@ -909,9 +1166,11 @@ int main(int argc, char *argv[])
       majorantsOutOfDate = false;
     }
 
+    #ifndef HEADLESS
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
+    #endif
 
     gprtBeginProfile(context);
 
@@ -942,12 +1201,26 @@ int main(int argc, char *argv[])
 
     char title[1000];
     sprintf(title,"%.2f FPS",(1.0/tavg));
-    gprtSetWindowTitle(context, title);
 
+    #ifdef HEADLESS
+    printf("%s\r\n", title);
+    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
+    #else
+    gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
+    #endif
 
     frameID ++;;
-  } while (!gprtWindowShouldClose(context));
+
+    // Clear .ini file so we don't read entries from it
+    // during the next loop iteration!
+    ini.clear();
+  }
+  #ifdef HEADLESS
+  while (0);
+  #else
+  while (!gprtWindowShouldClose(context));
+  #endif
 
   LOG("cleaning up ...");
 
