@@ -46,6 +46,7 @@
 #include "importers/import_points.h"
 #include "importers/import_arborx.h"
 #include "importers/import_mmpld.h"
+#include "importers/import_genericio.h"
 #include "IniFile.h"
 #include <argparse/argparse.hpp>
 
@@ -111,6 +112,9 @@ int main(int argc, char *argv[])
   program.add_argument("--mmpld")
       .help("A path to a MMPLD dataset (ending in .mmpld)")
       .default_value("");
+  program.add_argument("--cosmo")
+      .help("A path to a Cosmo dataset (ending in .?)")
+      .default_value("");
   program.add_argument("--points")
       .help("A path to our custom points dataset (ending in .points)")
       .default_value("");
@@ -139,11 +143,14 @@ int main(int argc, char *argv[])
 
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
+  std::string cosmoPath = program.get<std::string>("--cosmo");
   std::string pointsPath = program.get<std::string>("--points");
   if (dbscanPath != "")
     importArborX(dbscanPath, particleData);
   else if (mmpldPath != "")
     importMMPLD(mmpldPath, particleData);
+  else if (cosmoPath != "")
+    importCosmo(pointsPath, particleData);
   else if (pointsPath != "")
     importPoints(pointsPath, particleData);
   else
