@@ -136,9 +136,9 @@ class ParticleTracker {
       // allows colormap to hide attributes independent of RBF density
       // if (visualizeAttributes) density *= pow(payload.color.w, 3);
       if (!visualizeAttributes) {
-        float4 densityxf = colormap.SampleGrad(sampler, density, 0.f, 0.f);
+        float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
         payload.color.rgb = densityxf.rgb;
-        density = pow(densityxf.w, 3);
+        // density = pow(densityxf.w, 3);
       }
 
       RHS += density;
