@@ -124,7 +124,7 @@ int main(int argc, char *argv[])
 
   program.add_argument("--radius")
     .help("RBF radius")
-    .default_value(0.0)
+    .default_value(0.f)
     .scan<'g', float>();
  
   #ifdef HEADLESS
