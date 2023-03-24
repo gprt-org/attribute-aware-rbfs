@@ -1313,7 +1313,7 @@ int main(int argc, char *argv[])
     #ifdef HEADLESS
     char fileName[1000];
     if (orbitCount > 0)
-      sprintf(fileName,"./screenshot-r%f-%i.png",rbfRadius,(int)currentOrbitPos);
+      sprintf(fileName,"./screenshot-r%f-%i.png",rbfRadius,(int)(currentOrbitPos+1));
     else
       sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
     printf("%s\r\n", title);
