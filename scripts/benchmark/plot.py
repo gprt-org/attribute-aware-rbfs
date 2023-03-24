@@ -52,11 +52,11 @@ sorted_by_perf = sorted(zipped)
 fig, ax = plt.subplots(figsize=(6.4, 2.4))
 ax.yaxis.set_ticks_position("left")
 ax.xaxis.set_ticks_position("bottom")
-ax.set_xlabel("Render Time (ms)")
+ax.set_xlabel("Radius")
 ax.tick_params(axis="x")
 
 #scatter
-x, y = zip(*sorted_by_perf)
+y, x = zip(*sorted_by_perf)
 ax.scatter(x, y, clip_on=False, color=regions_color)
 # polyline
 npx = np.array(x);
