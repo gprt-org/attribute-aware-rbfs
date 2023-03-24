@@ -1317,6 +1317,7 @@ int main(int argc, char *argv[])
     else
       sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
     printf("%s\r\n", title);
+    fflush(stdout);
     gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
     #else
     gprtSetWindowTitle(context, title);
@@ -1365,6 +1366,7 @@ int main(int argc, char *argv[])
   #ifdef HEADLESS
   if (benchmark) {
     std::cout << "\n\n\n" << frameStats.str();
+    std::cout << std::flush;
     char fileName[1000];
     if (radiusArg > 0.f)
       sprintf(fileName,"./benchmark-r%f.txt",radiusArg);
