@@ -210,14 +210,29 @@ int main(int argc, char *argv[])
        -std::numeric_limits<float>::max()},
   };
 
+  std::vector<float3> aabbs;
+
   std::cout << "Computing bounding box..." << std::endl;
   for (size_t j = 0; j < particleData.size(); ++j)
   {
+    float3 thisAabb[2] = {
+        {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
+         std::numeric_limits<float>::max()},
+        {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
+         -std::numeric_limits<float>::max()},
+    };
+
     for (size_t i = 0; i < particleData[j].size(); ++i)
     {
       aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz());
       aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz());
+
+      thisAabb[0] = linalg::min(thisAabb[0], particleData[j][i].second.xyz());
+      thisAabb[1] = linalg::max(thisAabb[1], particleData[j][i].second.xyz());
     }
+
+    aabbs.push_back(thisAabb[0]);
+    aabbs.push_back(thisAabb[1]);
   }
   std::cout << " - Done!" << std::endl;
 
@@ -834,6 +849,7 @@ int main(int argc, char *argv[])
 
     int w_state = gprtGetKey(context, GPRT_KEY_W);
     int c_state = gprtGetKey(context, GPRT_KEY_C);
+    int b_state = gprtGetKey(context, GPRT_KEY_B);
     int x_state = gprtGetKey(context, GPRT_KEY_X);
     int y_state = gprtGetKey(context, GPRT_KEY_Y);
     int z_state = gprtGetKey(context, GPRT_KEY_Z);
@@ -860,6 +876,14 @@ int main(int argc, char *argv[])
                                << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
                                << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
                                << cosFovy << '\n';
+    }
+    // Shift-B prints the aabb and center of _this_ time step
+    if (b_state && shift)
+    {
+      std::cout << "AABB(" << particleFrame << "): "
+                << aabbs[particleFrame*2] << ',' << aabbs[particleFrame*2+1] << ", center: "
+                << (aabbs[particleFrame*2] + aabbs[particleFrame*2+1]) * 0.5f << ", diagonal: "
+                << length(aabbs[particleFrame*2] - aabbs[particleFrame*2+1]) << '\n';
     }
 
 
