@@ -605,6 +605,7 @@ int main(int argc, char *argv[])
 
   int previousParticleFrame = -1;
   float previousParticleRadius = 0.001f * diagonal;
+  float radiusArg = program.get<float>("--radius");
   bool renderAnimation = false;
   static bool disableBlueNoise = false;
   std::stringstream frameStats;
@@ -660,7 +661,6 @@ int main(int argc, char *argv[])
     static float rbfRadius = previousParticleRadius;
     ini.get_float("rbfRadius", rbfRadius);
     // cmdline overrides ini!
-    float radiusArg = program.get<float>("--radius");
     if (rbfRadius != previousParticleRadius && radiusArg > 0.f)
       rbfRadius = radiusArg;
 
@@ -1313,9 +1313,9 @@ int main(int argc, char *argv[])
     #ifdef HEADLESS
     char fileName[1000];
     if (orbitCount > 0)
-      sprintf(fileName,"./screenshot-%i.png",(int)currentOrbitPos);
+      sprintf(fileName,"./screenshot-r%f-%i.png",rbfRadius,(int)currentOrbitPos);
     else
-      sprintf(fileName,"./screenshot.png");
+      sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
     printf("%s\r\n", title);
     gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
     #else
@@ -1365,7 +1365,12 @@ int main(int argc, char *argv[])
   #ifdef HEADLESS
   if (benchmark) {
     std::cout << "\n\n\n" << frameStats.str();
-    std::ofstream out("benchmark.txt");
+    char fileName[1000];
+    if (radiusArg > 0.f)
+      sprintf(fileName,"./benchmark-r%f.txt",radiusArg);
+    else
+      sprintf(fileName,"./benchmark.txt");
+    std::ofstream out(fileName);
     out << "cmdline:\n";
     for (int i=0; i<argc; ++i)
       out << argv[i] << ' ';
