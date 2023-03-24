@@ -121,6 +121,11 @@ int main(int argc, char *argv[])
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
     .default_value(std::vector<float>{})
     .scan<'g', float>();
+
+  program.add_argument("--radius")
+    .help("RBF radius")
+    .default_value(0.0)
+    .scan<'g', float>();
  
   #ifdef HEADLESS
   program.add_argument("--orbit")
@@ -654,6 +659,11 @@ int main(int argc, char *argv[])
 
     static float rbfRadius = previousParticleRadius;
     ini.get_float("rbfRadius", rbfRadius);
+    // cmdline overrides ini!
+    float radiusArg = program.get<float>("--radius");
+    if (rbfRadius != previousParticleRadius && radiusArg > 0.f)
+      rbfRadius = radiusArg;
+
     #ifndef HEADLESS
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
     #endif
