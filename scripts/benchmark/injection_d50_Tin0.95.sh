@@ -13,6 +13,9 @@ orbit_count="--orbit 50"
 orbit_center="--orbit-center 100 197.501 100"
 orbit_up="--orbit-up 0 -1 0"
 orbit_radius="--orbit-radius 400"
+rbegin=0.1
+rend=0.1
+rinc=5.0
 
 ##
 scriptdir="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
@@ -22,4 +25,14 @@ mkdir -p ${outdir}
 cp ${scriptdir}/${name}.ini ${outdir}/viewer.ini
 cd ${outdir}
 echo "Running benchmark in: "$PWD
-${bindir}/viewer-headless ${data} ${orbit_count} ${orbit_center} ${orbit_up} ${orbit_radius} --benchmark
+for r in $(seq ${rbegin} ${rinc} ${rend})
+do
+  ${bindir}/viewer-headless     \
+            ${data}             \
+            ${orbit_count}      \
+            ${orbit_center}     \
+            ${orbit_up}         \
+            ${orbit_radius}     \
+            --radius $r         \
+            --benchmark
+done
