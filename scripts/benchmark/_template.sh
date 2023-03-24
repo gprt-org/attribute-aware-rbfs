@@ -8,6 +8,7 @@ name="_template"
 #
 bindir=/home/szellmann/point-clouds/build
 outdir=/home/szellmann/point-clouds-benchmarks/${name}
+data=
 orbit_count="--orbit 50"
 orbit_center="--orbit-center 0.000796274 6.25849e-07 0"
 orbit_up="--orbit-up 0 1 0"
@@ -27,10 +28,14 @@ echo "Running benchmark in: "$PWD
 for r in $(seq ${rbegin} ${rinc} ${rend})
 do
   ${bindir}/viewer-headless     \
+            ${data}             \
             ${orbit_count}      \
             ${orbit_center}     \
             ${orbit_up}         \
             ${orbit_radius}     \
             --radius $r         \
-            --benchmark
+            --benchmark         \
+        2>&1 | tee ${outdir}/${name}.out
 done
+
+python3 ${scriptdir}/plot.py ${outdir}/benchmark*.txt -o ${outdir}/plot_${name}.pdf

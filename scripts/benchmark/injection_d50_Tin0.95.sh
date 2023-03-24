@@ -34,5 +34,8 @@ do
             ${orbit_up}         \
             ${orbit_radius}     \
             --radius $r         \
-            --benchmark
+            --benchmark         \
+        2>&1 | tee ${outdir}/${name}.out
 done
+
+python3 ${scriptdir}/plot.py ${outdir}/benchmark*.txt -o ${outdir}/plot_${name}.pdf
