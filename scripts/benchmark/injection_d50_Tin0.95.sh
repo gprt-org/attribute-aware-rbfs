@@ -14,8 +14,8 @@ orbit_center="--orbit-center 100 197.501 100"
 orbit_up="--orbit-up 0 -1 0"
 orbit_radius="--orbit-radius 400"
 rbegin=0.1
-rend=0.1
-rinc=5.0
+rend=5.0
+rinc=0.1
 
 ##
 scriptdir="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
