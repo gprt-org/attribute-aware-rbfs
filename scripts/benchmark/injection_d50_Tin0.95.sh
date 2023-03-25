@@ -16,14 +16,20 @@ orbit_radius="--orbit-radius 400"
 rbegin=0.1
 rend=5.0
 rinc=0.1
+pplbegin=1
+pplend=32
+pplinc=1
 
 ##
 scriptdir="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
 
 echo "Create if not exists (outdir): "${outdir}
 mkdir -p ${outdir}
-cp ${scriptdir}/${name}.ini ${outdir}/viewer.ini
+
 cd ${outdir}
+mkdir -p varying-radius
+cp ${scriptdir}/${name}.ini ${outdir}/varying-radius/viewer.ini
+cd varying-radius
 echo "Running benchmark in: "$PWD
 for r in $(seq ${rbegin} ${rinc} ${rend})
 do
@@ -35,7 +41,26 @@ do
             ${orbit_radius}     \
             --radius $r         \
             --benchmark         \
-        2>&1 | tee ${outdir}/${name}.out
+        2>&1 | tee ${outdir}/varying-radius/${name}.out
 done
 
-python3 ${scriptdir}/plot.py ${outdir}/benchmark*.txt -o ${outdir}/plot_${name}.pdf
+cd ${outdir}
+mkdir -p varying-ppl
+cp ${scriptdir}/${name}.ini ${outdir}/varying-ppl/viewer.ini
+cd varying-ppl
+echo "Running varying-ppl benchmark in: "$PWD
+for ppl in $(seq ${pplbegin} ${pplinc} ${pplend})
+do
+  ${bindir}/viewer-headless             \
+            ${data}                     \
+            ${orbit_count}              \
+            ${orbit_center}             \
+            ${orbit_up}                 \
+            ${orbit_radius}             \
+            --particles-per-leaf $ppl   \
+            --benchmark                 \
+        2>&1 | tee ${outdir}/varying-ppl/${name}.out
+done
+
+python3 ${scriptdir}/plot.py ${outdir}/varying-radius/benchmark*.txt -o ${outdir}/varying-radius/plot_${name}.pdf
+python3 ${scriptdir}/plot.py ${outdir}/varying-ppl/benchmark*.txt -o ${outdir}/varying-ppl/plot_${name}.pdf
