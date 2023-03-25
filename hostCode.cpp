@@ -126,6 +126,11 @@ int main(int argc, char *argv[])
     .help("RBF radius")
     .default_value(0.f)
     .scan<'g', float>();
+
+  program.add_argument("--particles-per-leaf")
+    .help("Particles per leaf")
+    .default_value(0)
+    .scan<'u', uint32_t>();
  
   #ifdef HEADLESS
   program.add_argument("--orbit")
@@ -469,6 +474,10 @@ int main(int argc, char *argv[])
   ini.get_vec3f("color1", missData->color1.x, missData->color1.y, missData->color1.z, 0.0f, 0.0f, 0.0f);
 
   ini.get_uint32("particlesPerLeaf", particlesPerLeaf, 16);
+  uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
+  // overwrites ini!
+  if (particlesPerLeafArg > 0)
+    particlesPerLeaf = particlesPerLeafArg;
 
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
@@ -1337,7 +1346,7 @@ int main(int argc, char *argv[])
     #ifdef HEADLESS
     char fileName[1000];
     if (orbitCount > 0)
-      sprintf(fileName,"./screenshot-r%f-%i.png",rbfRadius,(int)(currentOrbitPos+1));
+      sprintf(fileName,"./screenshot-r%f-ppl%u-orbit%i.png",rbfRadius,particlesPerLeaf,(int)(currentOrbitPos+1));
     else
       sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
     printf("%s\r\n", title);
@@ -1393,9 +1402,9 @@ int main(int argc, char *argv[])
     std::cout << std::flush;
     char fileName[1000];
     if (radiusArg > 0.f)
-      sprintf(fileName,"./benchmark-r%f.txt",radiusArg);
+      sprintf(fileName,"./benchmark-r%f-ppl%u.txt",radiusArg,particlesPerLeaf);
     else
-      sprintf(fileName,"./benchmark.txt");
+      sprintf(fileName,"./benchmark-ppl%u.txt",particlesPerLeaf);
     std::ofstream out(fileName);
     out << "cmdline:\n";
     for (int i=0; i<argc; ++i)
