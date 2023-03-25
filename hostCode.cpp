@@ -129,7 +129,7 @@ int main(int argc, char *argv[])
 
   program.add_argument("--particles-per-leaf")
     .help("Particles per leaf")
-    .default_value(0)
+    .default_value(0U)
     .scan<'u', uint32_t>();
  
   #ifdef HEADLESS
