@@ -54,6 +54,7 @@
 #include <execution>
 #include <algorithm>
 #include "hilbert.h"
+#include "timer.h"
 
 #define LOG(message)                                           \
   std::cout << GPRT_TERMINAL_BLUE;                             \
@@ -296,6 +297,7 @@ int main(int argc, char *argv[])
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
+  double beforeHilbert = getCurrentTime();
   for (size_t j = 0; j < particleData.size(); ++j)
   {
     std::for_each(std::execution::par_unseq, std::begin(particleData[j]),
@@ -308,13 +310,18 @@ int main(int argc, char *argv[])
       const bitmask_t coord[3] = {bitmask_t(tmp.x), bitmask_t(tmp.y), bitmask_t(tmp.z)};
       i.first = hilbert_c2i(3, 16, coord); });
   }
+  double afterHilbert = getCurrentTime();
+  double hilbertTime = afterHilbert-beforeHilbert;
   std::cout << " - Done!" << std::endl;
 
   std::cout << "Sorting points along hilbert curve..." << std::endl;
+  double beforeSort = getCurrentTime();
   for (size_t j = 0; j < particleData.size(); ++j)
   {
     std::sort(std::execution::par_unseq, particleData[j].begin(), particleData[j].end());
   }
+  double afterSort = getCurrentTime();
+  double sortTime = afterSort-beforeSort;
   std::cout << " - Done!" << std::endl;
 
   // here just transferring to a vector we can actually use.
@@ -323,6 +330,7 @@ int main(int argc, char *argv[])
   float minScalarValue = +1e20f;
   float maxScalarValue = -1e20f;
 
+  double beforeValueRange = getCurrentTime();
   particles.resize(particleData.size());
   for (size_t j = 0; j < particleData.size(); ++j) {
     particles[j].resize(particleData[j].size());
@@ -334,6 +342,8 @@ int main(int argc, char *argv[])
     particleData[j].clear();
     maxNumParticles = std::max(maxNumParticles, particles[j].size());
   }
+  double afterValueRange = getCurrentTime();
+  double valueRangeTime = afterValueRange-beforeValueRange;
 
   // normalize attributes
   if (maxScalarValue > minScalarValue) {
@@ -1215,6 +1225,7 @@ int main(int argc, char *argv[])
       std::cout << std::flush;
     }
 
+    double accelBuildTime = 0.0;
     if (previousParticleFrame != particleFrame) {    
       // std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord->numParticles = particles[particleFrame].size();
@@ -1236,8 +1247,11 @@ int main(int argc, char *argv[])
       gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
 
       // Now we can build the tree
+      double beforeAccelBuild = getCurrentTime();
       gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+      double afterAccelBuild = getCurrentTime();
+      accelBuildTime = afterAccelBuild-beforeAccelBuild;
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
@@ -1260,6 +1274,7 @@ int main(int argc, char *argv[])
       previousParticleFrame = particleFrame;
     }
 
+    double accelUpdateTime = 0.0;
     if (previousParticleRadius != rbfRadius || radiusEdited) {
       particleRecord->rbfRadius = rbfRadius;
       raygenData.rbfRadius = rbfRadius;
@@ -1270,8 +1285,11 @@ int main(int argc, char *argv[])
       gprtComputeLaunch1D(context, GenRBFBounds, (maxNumParticles + (particlesPerLeaf - 1)) / particlesPerLeaf);
 
       // Now we can refit the tree
+      double beforeAccelUpdate = getCurrentTime();
       gprtAccelUpdate(context, particleAccel);
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+      double afterAccelUpdate = getCurrentTime();
+      accelUpdateTime = afterAccelUpdate-beforeAccelUpdate;
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
@@ -1394,10 +1412,13 @@ int main(int argc, char *argv[])
     if (benchmark) {
       static int firstFrame = true;
       if (firstFrame) {
-        frameStats << "\"orbitID\"; \"RBF radius\"; \"Particles per leaf\"; \"frame time (sec.)\"; \"camera string\"\n";
+        frameStats << "\"orbitID\"; \"RBF radius\"; \"Particles per leaf\"; ";
+        frameStats << "\"frame time (sec.)\"; \"hilbert time (sec.)\"; \"sort time (sec.)\"; \"value range time (sec.)\"; \"accel build time (sec.)\"; ";
+        frameStats << "\"camera string\"\n";
         firstFrame = false;
       }
-      frameStats << currentOrbitPos << ';' << rbfRadius << ';' << particlesPerLeaf << ';' << profile << ';';
+      frameStats << currentOrbitPos << ';' << rbfRadius << ';' << particlesPerLeaf << ';';
+      frameStats << profile << ';' << hilbertTime << ';' << sortTime << ';' << valueRangeTime << ';' << accelBuildTime << ';' << accelUpdateTime << ';';
       frameStats << "\"--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
                                   << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
                                   << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
