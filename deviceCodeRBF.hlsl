@@ -62,7 +62,7 @@ class ParticleTracker {
   float3 lb;
   float3 rt;
 
-  float RHS;
+  float LHS;
 
   bool shadowRay;
 
@@ -85,7 +85,7 @@ class ParticleTracker {
     float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
     float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
 
-    float LHS = -log(1.f - random * .99);
+    float RHS = -log(1.f - random * .99);
 
     // float 
     // t = t0; // + jitter * unit;
@@ -141,9 +141,64 @@ class ParticleTracker {
         // density = pow(densityxf.w, 3);
       }
 
-      RHS += density;
+      LHS += density;
 
-      if (RHS > LHS && !shadowRay) {
+      if (LHS > RHS && !shadowRay) {
+        // LHS = LHS - density;
+        // float diff = RHS - LHS;
+        // float tshift = -(log(1.0f - lcg_randomf(rng)) / majorant) * unit; (diff * unit) / (density);
+        // t = t - unit;
+        // t = t + tshift;
+
+        // if (dbg) printf("TSHIFT %f\n", tshift);
+
+        // // Update current position
+        // float3 x = org + t * dir;
+
+        // // Sample heterogeneous media
+        // RayDesc pointDesc;
+        // pointDesc.Origin = x;
+        // pointDesc.Direction = float3(1.f, 1.f, 1.f); // something non-zero
+        // pointDesc.TMin = 0.0;
+        // pointDesc.TMax = 0.0;
+        // RBFPayload payload; 
+        // payload.count = 0;
+        // payload.density = 0.f;       
+        // payload.color = float4(0.f, 0.f, 0.f, 0.f);
+        // TraceRay(accel,                  // the tree
+        //         RAY_FLAG_NONE,           // ray flags
+        //         0xff,                    // instance inclusion mask
+        //         0,                       // ray type
+        //         gprt::getNumRayTypes(),  // number of ray types
+        //         0,                       // miss type
+        //         pointDesc,               // the ray to trace
+        //         payload                  // the payload IO
+        // );
+
+
+        // if (payload.count > 0) {
+        //   payload.color /= payload.density;
+        //   if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
+        // }
+        // else {
+        //   t = t + unit; 
+        //   continue;
+        // }
+        
+        // if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
+
+        // float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
+        
+        // // allows colormap to hide attributes independent of RBF density
+        // // if (visualizeAttributes) density *= pow(payload.color.w, 3);
+        // if (!visualizeAttributes) {
+        //   float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+        //   payload.color.rgb = densityxf.rgb;
+        //   // density = pow(densityxf.w, 3);
+        // }
+
+
+
         albedo = float4(payload.color.rgb, 1.f);
         return false; // terminate traversal
       }
@@ -311,9 +366,9 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     tracker.majorants = record.majorants;
     tracker.dimensions = record.ddaDimensions;
     tracker.i = 0;
-    tracker.RHS = 0;
+    tracker.LHS = 0;
     tracker.random = random.x;  
-    tracker.unit = record.unit + record.jitter * record.rbfRadius * random.z;
+    tracker.unit = record.unit;
     tracker.visualizeAttributes = record.visualizeAttributes;
     tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
     tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
@@ -344,7 +399,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       ddaRay.Direction = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
       ddaRay.TMin = 0.f;
       ddaRay.TMax = texit;
-      tracker.t = tenter; // + lcg_randomf(rng) * record.rbfRadius;
+      tracker.t = tenter + record.unit * random.y; // + lcg_randomf(rng) * record.rbfRadius;
       dda3(ddaRay, tracker.dimensions, false, tracker);
 
       // tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
@@ -374,11 +429,11 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         //tracker.t = 0.1f;
         tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
         tracker.dbg = false;
-        tracker.RHS = 0;
+        tracker.LHS = 0;
         tracker.shadowRay = true;
         // tracker.random = random.y;
         // tracker.unit = record.rbfRadius * .5; //record.shadowUnit;
-        tracker.t = record.rbfRadius * .001f + record.jitter * record.rbfRadius * random.y;
+        tracker.t = record.rbfRadius * .5f;// * .001f + record.jitter * record.rbfRadius * random.y;
         dda3(ddaRay, tracker.dimensions, false, tracker);
 
         float ts = tracker.t;
