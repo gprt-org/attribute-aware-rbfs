@@ -433,7 +433,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         tracker.shadowRay = true;
         // tracker.random = random.y;
         // tracker.unit = record.rbfRadius * .5; //record.shadowUnit;
-        tracker.t = record.rbfRadius * .5f;// * .001f + record.jitter * record.rbfRadius * random.y;
+        tracker.t = record.unit * random.z; //record.rbfRadius * .5f;// * .001f + record.jitter * record.rbfRadius * random.y;
         dda3(ddaRay, tracker.dimensions, false, tracker);
 
         float ts = tracker.t;
