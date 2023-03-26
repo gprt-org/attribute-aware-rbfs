@@ -313,7 +313,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     tracker.i = 0;
     tracker.RHS = 0;
     tracker.random = random.x;  
-    tracker.unit = record.unit;// + record.jitter * record.rbfRadius * random.z;
+    tracker.unit = record.unit + record.jitter * record.rbfRadius * random.z;
     tracker.visualizeAttributes = record.visualizeAttributes;
     tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
     tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
@@ -378,7 +378,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         tracker.shadowRay = true;
         // tracker.random = random.y;
         // tracker.unit = record.rbfRadius * .5; //record.shadowUnit;
-        tracker.t = record.jitter; //record.rbfRadius * .001f + record.jitter * record.rbfRadius * random.y;
+        tracker.t = record.rbfRadius * .001f + record.jitter * record.rbfRadius * random.y;
         dda3(ddaRay, tracker.dimensions, false, tracker);
 
         float ts = tracker.t;
