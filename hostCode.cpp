@@ -36,6 +36,7 @@
 
 #ifdef HEADLESS
 #include "ColorMap.h"
+#include "generateFibonacciSphere.h"
 #else
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
@@ -120,7 +121,46 @@ int main(int argc, char *argv[])
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
     .default_value(std::vector<float>{})
     .scan<'g', float>();
-  
+
+  program.add_argument("--radius")
+    .help("RBF radius")
+    .default_value(0.f)
+    .scan<'g', float>();
+
+  program.add_argument("--particles-per-leaf")
+    .help("Particles per leaf")
+    .default_value(0U)
+    .scan<'u', uint32_t>();
+ 
+  #ifdef HEADLESS
+  program.add_argument("--orbit")
+    .help("Number of spherical orbits for benchmark")
+    .default_value(0)
+    .scan<'i', int>();
+
+  program.add_argument("--orbit-center")
+    .nargs(3)
+    .help("Orbit center vector (cx, cy, cz)")
+    .default_value(std::vector{{1e20f,1e20f,1e20f}})
+    .scan<'g', float>();
+
+  program.add_argument("--orbit-up")
+    .nargs(3)
+    .help("Orbit up vector (upx, upy, upz)")
+    .default_value(std::vector{{0.f,1.f,0.f}})
+    .scan<'g', float>();
+
+  program.add_argument("--orbit-radius")
+    .help("Orbit radius")
+    .default_value(-1.f)
+    .scan<'g', float>();
+
+  program.add_argument("--benchmark")
+    .help("Run in benchmark mode")
+    .default_value(false)
+    .implicit_value(true);
+  #endif
+
   try {
     program.parse_args(argc, argv);
   }
@@ -175,14 +215,29 @@ int main(int argc, char *argv[])
        -std::numeric_limits<float>::max()},
   };
 
+  std::vector<float3> aabbs;
+
   std::cout << "Computing bounding box..." << std::endl;
   for (size_t j = 0; j < particleData.size(); ++j)
   {
+    float3 thisAabb[2] = {
+        {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
+         std::numeric_limits<float>::max()},
+        {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
+         -std::numeric_limits<float>::max()},
+    };
+
     for (size_t i = 0; i < particleData[j].size(); ++i)
     {
       aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz());
       aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz());
+
+      thisAabb[0] = linalg::min(thisAabb[0], particleData[j][i].second.xyz());
+      thisAabb[1] = linalg::max(thisAabb[1], particleData[j][i].second.xyz());
     }
+
+    aabbs.push_back(thisAabb[0]);
+    aabbs.push_back(thisAabb[1]);
   }
   std::cout << " - Done!" << std::endl;
 
@@ -203,7 +258,41 @@ int main(int argc, char *argv[])
       lookAt = {0.f, 0.f, -1.f};
       lookFrom = {0.f, 0.f, 0.f};
     }
-  }  
+  }
+
+  bool camChanged = camParams.empty();
+
+  #ifdef HEADLESS
+  int orbitCount = program.get<int>("--orbit");
+  std::vector<float> vOrbitCenter = program.get<std::vector<float>>("--orbit-center");
+  std::vector<float> vOrbitUp = program.get<std::vector<float>>("--orbit-up");
+  float orbitRadius = program.get<float>("--orbit-radius");
+  float3 orbitCenter(vOrbitCenter[0], vOrbitCenter[1], vOrbitCenter[2]);
+  float3 orbitUp(vOrbitUp[0], vOrbitUp[1], vOrbitUp[2]);
+
+  std::vector<float3> orbitCameraPositions;
+  size_t currentOrbitPos = 0;
+
+  if (orbitCount != 0) {
+      if (orbitRadius <= 0.f) {
+          orbitRadius = length(aabb[1] - aabb[0]) / 2.f;
+      }
+      std::cout << "orbit radius: " << orbitRadius << "\n";
+      if (orbitCenter == float3(1e20f)) {
+          orbitCenter = (aabb[0] + aabb[1]) / 2.f;
+      }
+      std::cout << "orbit center: " << orbitCenter << "\n";
+      orbitCameraPositions = generate_fibonacci_sphere(orbitCount, orbitRadius);
+
+      std::cout << "starting pos " << orbitCenter + orbitCameraPositions[currentOrbitPos] << "\n";
+
+      lookFrom = lookAt + orbitCameraPositions[currentOrbitPos];
+      lookAt   = orbitCenter;
+      lookUp   = orbitUp;
+  }
+
+  bool benchmark = program.get<bool>("--benchmark");
+  #endif
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -384,6 +473,12 @@ int main(int argc, char *argv[])
   ini.get_vec3f("color0", missData->color0.x, missData->color0.y, missData->color0.z, 0.1f, 0.1f, 0.1f);
   ini.get_vec3f("color1", missData->color1.x, missData->color1.y, missData->color1.z, 0.0f, 0.0f, 0.0f);
 
+  ini.get_uint32("particlesPerLeaf", particlesPerLeaf, 16);
+  uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
+  // overwrites ini!
+  if (particlesPerLeafArg > 0)
+    particlesPerLeaf = particlesPerLeafArg;
+
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
   auto aabbBuffer =
@@ -535,9 +630,11 @@ int main(int argc, char *argv[])
 
   int previousParticleFrame = -1;
   float previousParticleRadius = 0.001f * diagonal;
+  float radiusArg = program.get<float>("--radius");
   bool renderAnimation = false;
   bool playAnimation = false;
   static bool disableBlueNoise = false;
+  std::stringstream frameStats;
   do
   {
     #ifndef HEADLESS
@@ -547,6 +644,7 @@ int main(int argc, char *argv[])
     
 
     static int particleFrame = 0;
+    ini.get_int32("particleFrame", particleFrame);
 
     #ifdef HEADLESS
     //
@@ -601,6 +699,10 @@ int main(int argc, char *argv[])
 
     static float rbfRadius = previousParticleRadius;
     ini.get_float("rbfRadius", rbfRadius);
+    // cmdline overrides ini!
+    if (rbfRadius != previousParticleRadius && radiusArg > 0.f)
+      rbfRadius = radiusArg;
+
     #ifndef HEADLESS
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
     #endif
@@ -732,7 +834,7 @@ int main(int argc, char *argv[])
     raygenData.spp = spp;
 
     #ifdef HEADLESS
-    bool fovChanged = firstFrame; // TODO
+    bool fovChanged = firstFrame;
     #else
     bool fovChanged = ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f) ;
     #endif
@@ -771,6 +873,7 @@ int main(int argc, char *argv[])
 
     int w_state = gprtGetKey(context, GPRT_KEY_W);
     int c_state = gprtGetKey(context, GPRT_KEY_C);
+    int b_state = gprtGetKey(context, GPRT_KEY_B);
     int x_state = gprtGetKey(context, GPRT_KEY_X);
     int y_state = gprtGetKey(context, GPRT_KEY_Y);
     int z_state = gprtGetKey(context, GPRT_KEY_Z);
@@ -797,6 +900,14 @@ int main(int argc, char *argv[])
                                << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
                                << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
                                << cosFovy << '\n';
+    }
+    // Shift-B prints the aabb and center of _this_ time step
+    if (b_state && shift)
+    {
+      std::cout << "AABB(" << particleFrame << "): "
+                << aabbs[particleFrame*2] << ',' << aabbs[particleFrame*2+1] << ", center: "
+                << (aabbs[particleFrame*2] + aabbs[particleFrame*2+1]) * 0.5f << ", diagonal: "
+                << length(aabbs[particleFrame*2] - aabbs[particleFrame*2+1]) << '\n';
     }
 
 
@@ -860,18 +971,40 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
-      ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
-                                  raygenData.camera.pos.y,
-                                  raygenData.camera.pos.z);
-      ini.get_vec3f("camera.dir_00", raygenData.camera.dir_00.x,
-                                     raygenData.camera.dir_00.y,
-                                     raygenData.camera.dir_00.z);
-      ini.get_vec3f("camera.dir_du", raygenData.camera.dir_du.x,
-                                     raygenData.camera.dir_du.y,
-                                     raygenData.camera.dir_du.z);
-      ini.get_vec3f("camera.dir_dv", raygenData.camera.dir_dv.x,
-                                     raygenData.camera.dir_dv.y,
-                                     raygenData.camera.dir_dv.z);
+      if (camParams.empty()) {
+        #ifdef HEADLESS
+        if (orbitCount == 0) {
+        #endif
+
+        auto error_pos =
+        ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
+                                    raygenData.camera.pos.y,
+                                    raygenData.camera.pos.z);
+        auto error_dir00 =
+        ini.get_vec3f("camera.dir_00", raygenData.camera.dir_00.x,
+                                       raygenData.camera.dir_00.y,
+                                       raygenData.camera.dir_00.z);
+        auto error_dir_du =
+        ini.get_vec3f("camera.dir_du", raygenData.camera.dir_du.x,
+                                       raygenData.camera.dir_du.y,
+                                       raygenData.camera.dir_du.z);
+        auto error_dir_dv =
+        ini.get_vec3f("camera.dir_dv", raygenData.camera.dir_dv.x,
+                                       raygenData.camera.dir_dv.y,
+                                       raygenData.camera.dir_dv.z);
+
+        #ifdef HEADLESS
+        if (error_pos    == IniFile::Ok &&
+            error_dir00  == IniFile::Ok &&
+            error_dir_du == IniFile::Ok &&
+            error_dir_dv == IniFile::Ok)
+          camChanged = false; // don't recompute!
+        #endif
+
+        #ifdef HEADLESS
+        }
+        #endif
+      }
 
       accumID = 1;
     }
@@ -904,6 +1037,9 @@ int main(int argc, char *argv[])
 
     #ifndef HEADLESS
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse)
+    #else
+    if (camChanged)
+    #endif
     {
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
@@ -930,10 +1066,13 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
+     
+      #if HEADLESS
+      camChanged = false;
+      #endif
 
       accumID = 1;
     }
-    #endif
 
     static float sigma = 3.f;
     static float clampMaxCumulativeValue = 1.f;
@@ -1046,6 +1185,7 @@ int main(int argc, char *argv[])
       std::cout << "clampMaxCumulativeValue=" << raygenData.clampMaxCumulativeValue << '\n';
       std::cout << "sigma=" << raygenData.sigma << '\n';
       std::cout << "power=" << raygenData.power << '\n';
+      std::cout << "particlesPerLeaf=" << raygenData.particlesPerLeaf << '\n';
       std::cout << "ddaDimensions=" << raygenData.ddaDimensions << '\n';
       std::cout << "visualizeAttributes=" << raygenData.visualizeAttributes << '\n';
       std::cout << "useDDA=" << raygenData.useDDA << '\n';
@@ -1065,6 +1205,7 @@ int main(int argc, char *argv[])
       std::cout << "color0=" << missData->color0 << '\n';
       std::cout << "color1=" << missData->color1 << '\n';
       std::cout << "\n[Misc.]\n";
+      std::cout << "particleFrame=" << particleFrame << '\n';
       std::cout << "mode=" << mode << '\n';
       #ifndef HEADLESS
       std::cout << "colormap=" << marksToString(cmMarks) << '\n';
@@ -1224,11 +1365,44 @@ int main(int argc, char *argv[])
     sprintf(title,"%.2f FPS",(1.0/tavg));
 
     #ifdef HEADLESS
+    char fileName[1000];
+    if (orbitCount > 0)
+      sprintf(fileName,"./screenshot-r%f-ppl%u-orbit%i.png",rbfRadius,particlesPerLeaf,(int)(currentOrbitPos+1));
+    else
+      sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
     printf("%s\r\n", title);
-    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
+    fflush(stdout);
+    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
     #else
     gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
+    #endif
+
+    #ifdef HEADLESS
+    if (orbitCount > 0) {
+      ++currentOrbitPos;
+      float3 nextPos = orbitCenter + orbitCameraPositions[currentOrbitPos];
+      nextPos.z = std::abs(nextPos.z);
+      std::cout << "Advance to orbit #" << currentOrbitPos << "\nOrbit pos " << nextPos << "\n";
+
+      lookFrom = nextPos;
+      lookAt   = orbitCenter;
+      lookUp   = orbitUp;
+      camChanged = true;
+    }
+
+    if (benchmark) {
+      static int firstFrame = true;
+      if (firstFrame) {
+        frameStats << "\"orbitID\"; \"RBF radius\"; \"frame time (sec.)\"; \"camera string\"\n";
+        firstFrame = false;
+      }
+      frameStats << currentOrbitPos << ';' << rbfRadius << ';' << profile << ';';
+      frameStats << "\"--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
+                                  << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
+                                  << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
+                                  << cosFovy << "\"\n";
+    }
     #endif
 
     accumID ++;;
@@ -1239,9 +1413,27 @@ int main(int argc, char *argv[])
     ini.clear();
   }
   #ifdef HEADLESS
-  while (0);
+  while (currentOrbitPos < orbitCount);
   #else
   while (!gprtWindowShouldClose(context));
+  #endif
+
+  #ifdef HEADLESS
+  if (benchmark) {
+    std::cout << "\n\n\n" << frameStats.str();
+    std::cout << std::flush;
+    char fileName[1000];
+    if (radiusArg > 0.f)
+      sprintf(fileName,"./benchmark-r%f-ppl%u.txt",radiusArg,particlesPerLeaf);
+    else
+      sprintf(fileName,"./benchmark-ppl%u.txt",particlesPerLeaf);
+    std::ofstream out(fileName);
+    out << "cmdline:\n";
+    for (int i=0; i<argc; ++i)
+      out << argv[i] << ' ';
+    out << "\n\n";
+    out << frameStats.str();
+  }
   #endif
 
   LOG("cleaning up ...");
