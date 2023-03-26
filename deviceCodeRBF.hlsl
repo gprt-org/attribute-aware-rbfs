@@ -41,6 +41,7 @@ class ParticleTracker {
   uint3 dimensions;
   int i;
   float random;
+  LCGRand rng; // for tracking
 
   float unit;
   float clampMaxCumulativeValue;
@@ -65,12 +66,23 @@ class ParticleTracker {
   float LHS;
 
   bool shadowRay;
+  bool doMarching;
+
 
   bool lambda(RayDesc ray, int3 cell, float t0, float t1) {    
-    float majorant = gprt::load<float>(
-      majorants,
-      cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
-    );
+    if (doMarching) {
+      return stochasticMarching(ray, cell, t0, t1);
+    }
+    else {
+      return stochasticTracking(ray, cell, t0, t1);
+    }
+  }
+  
+  bool stochasticMarching(RayDesc ray, int3 cell, float t0, float t1) {    
+    // float majorant = gprt::load<float>(
+    //   majorants,
+    //   cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
+    // );
 
     // skip to the next cell
     // if (majorant <= 0.f) {
@@ -90,6 +102,8 @@ class ParticleTracker {
     // float 
     // t = t0; // + jitter * unit;
     for (; i < MAX_DEPTH; ++i) {
+
+      t = t + unit; 
 
       // A boundary has been hit
       if (t >= t1) {
@@ -125,7 +139,7 @@ class ParticleTracker {
         if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
       }
       else {
-        t = t + unit; 
+        // t = t + unit; 
         continue;
       }
       
@@ -144,164 +158,102 @@ class ParticleTracker {
       LHS += density;
 
       if (LHS > RHS && !shadowRay) {
-        // LHS = LHS - density;
-        // float diff = RHS - LHS;
-        // float tshift = -(log(1.0f - lcg_randomf(rng)) / majorant) * unit; (diff * unit) / (density);
-        // t = t - unit;
-        // t = t + tshift;
-
-        // if (dbg) printf("TSHIFT %f\n", tshift);
-
-        // // Update current position
-        // float3 x = org + t * dir;
-
-        // // Sample heterogeneous media
-        // RayDesc pointDesc;
-        // pointDesc.Origin = x;
-        // pointDesc.Direction = float3(1.f, 1.f, 1.f); // something non-zero
-        // pointDesc.TMin = 0.0;
-        // pointDesc.TMax = 0.0;
-        // RBFPayload payload; 
-        // payload.count = 0;
-        // payload.density = 0.f;       
-        // payload.color = float4(0.f, 0.f, 0.f, 0.f);
-        // TraceRay(accel,                  // the tree
-        //         RAY_FLAG_NONE,           // ray flags
-        //         0xff,                    // instance inclusion mask
-        //         0,                       // ray type
-        //         gprt::getNumRayTypes(),  // number of ray types
-        //         0,                       // miss type
-        //         pointDesc,               // the ray to trace
-        //         payload                  // the payload IO
-        // );
-
-
-        // if (payload.count > 0) {
-        //   payload.color /= payload.density;
-        //   if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
-        // }
-        // else {
-        //   t = t + unit; 
-        //   continue;
-        // }
-        
-        // if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
-
-        // float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
-        
-        // // allows colormap to hide attributes independent of RBF density
-        // // if (visualizeAttributes) density *= pow(payload.color.w, 3);
-        // if (!visualizeAttributes) {
-        //   float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
-        //   payload.color.rgb = densityxf.rgb;
-        //   // density = pow(densityxf.w, 3);
-        // }
-
-
-
         albedo = float4(payload.color.rgb, 1.f);
         return false; // terminate traversal
       }
 
       if (shadowRay) {
-        albedo.w += density;
+        albedo.w += 1.f - exp(-density);
         if (albedo.w >= 1.f) {
           albedo.w = 1.f;
           return false;
         }
       }
 
-      t = t + unit; 
-
-      
-
-      // if (lcg_randomf(rng) < density / (majorant)) {
-      // }
     }
 
     // stop traversal if we hit our sampling limit (avoids lockup)
     return false;
   };
 
-  // bool lambda(RayDesc ray, int3 cell, float t0, float t1) {    
-  //   float majorant = gprt::load<float>(
-  //     majorants,
-  //     cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
-  //   );
+  bool stochasticTracking(RayDesc ray, int3 cell, float t0, float t1) {    
+    // float majorant = gprt::load<float>(
+    //   majorants,
+    //   cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
+    // );
 
-  //   // skip to the next cell
-  //   if (majorant <= 0.f) return true; 
+    // // skip to the next cell
+    // if (majorant <= 0.f) return true; 
 
-  //   majorant = 1.f;
+    float majorant = 1.f;
 
-  //   RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
-  //   SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
-  //   Texture1D colormap = gprt::getTexture1DHandle(cmap);
-  //   float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
-  //   float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
+    RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
+    SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
+    Texture1D colormap = gprt::getTexture1DHandle(cmap);
+    Texture1D densitymap = gprt::getTexture1DHandle(dmap);
+    float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
+    float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
 
-  //   // float 
-  //   t = t0;
-  //   for (; i < MAX_DEPTH; ++i) {
-  //     // Sample a distance
-  //     t = t - (log(1.0f - lcg_randomf(rng)) / majorant) * unit;
+    // float 
+    t = t0;
+    for (; i < MAX_DEPTH; ++i) {
+      // Sample a distance
+      t = t - (log(1.0f - lcg_randomf(rng)) / majorant) * unit;
 
-  //     // A boundary has been hit
-  //     if (t >= t1) {
-  //       return true; // skip to next cell
-  //     }
+      // A boundary has been hit
+      if (t >= t1) {
+        return true; // skip to next cell
+      }
 
-  //     // Update current position
-  //     float3 x = org + t * dir;
+      // Update current position
+      float3 x = org + t * dir;
 
-  //     // Sample heterogeneous media
-  //     RayDesc pointDesc;
-  //     pointDesc.Origin = x;
-  //     pointDesc.Direction = float3(1.f, 1.f, 1.f); // something non-zero
-  //     pointDesc.TMin = 0.0;
-  //     pointDesc.TMax = 0.0;
-  //     RBFPayload payload; 
-  //     payload.count = 0;
-  //     payload.density = 0.f;       
-  //     payload.color = float4(0.f, 0.f, 0.f, 0.f);
-  //     TraceRay(accel,                  // the tree
-  //             RAY_FLAG_NONE,           // ray flags
-  //             0xff,                    // instance inclusion mask
-  //             0,                       // ray type
-  //             gprt::getNumRayTypes(),  // number of ray types
-  //             0,                       // miss type
-  //             pointDesc,               // the ray to trace
-  //             payload                  // the payload IO
-  //     );
+      // Sample heterogeneous media
+      RayDesc pointDesc;
+      pointDesc.Origin = x;
+      pointDesc.Direction = float3(1.f, 1.f, 1.f); // something non-zero
+      pointDesc.TMin = 0.0;
+      pointDesc.TMax = 0.0;
+      RBFPayload payload; 
+      payload.count = 0;
+      payload.density = 0.f;       
+      payload.color = float4(0.f, 0.f, 0.f, 0.f);
+      TraceRay(accel,                  // the tree
+              RAY_FLAG_NONE,           // ray flags
+              0xff,                    // instance inclusion mask
+              0,                       // ray type
+              gprt::getNumRayTypes(),  // number of ray types
+              0,                       // miss type
+              pointDesc,               // the ray to trace
+              payload                  // the payload IO
+      );
 
 
-  //     if (payload.count > 0) {
-  //       payload.color /= payload.density;
-  //       if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
-  //     }
-  //     else continue;
+      if (payload.count > 0) {
+        payload.color /= payload.density;
+        if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
+      }
+      else continue;
       
-  //     if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
+      if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
 
-  //     float density = payload.density;
+      float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
-  //     // allows colormap to hide attributes independent of RBF density
-  //     if (visualizeAttributes) density *= pow(payload.color.w, 3);
-  //     else {
-  //       float4 densityxf = colormap.SampleGrad(sampler, density, 0.f, 0.f);
-  //       payload.color.rgb = densityxf.rgb;
-  //       density = pow(densityxf.w, 3);
-  //     }
+      if (!visualizeAttributes) {
+        float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
+        payload.color.rgb = densityxf.rgb;
+        // density = pow(densityxf.w, 3);
+      }
 
-  //     if (lcg_randomf(rng) < density / (majorant)) {
-  //       albedo = float4(payload.color.rgb, 1.f);
-  //       return false; // terminate traversal
-  //     }
-  //   }
+      if (lcg_randomf(rng) < density / (majorant)) {
+        albedo = float4(payload.color.rgb, 1.f);
+        return false; // terminate traversal
+      }
+    }
 
-  //   // stop traversal if we hit our sampling limit (avoids lockup)
-  //   return false;
-  // };
+    // stop traversal if we hit our sampling limit (avoids lockup)
+    return false;
+  };
 };
 
 GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
@@ -355,10 +307,13 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
     if (!record.disableBlueNoise) {
       random = stbn[int2(pixelID.x % 128,pixelID.y % 128)].rgb;
+      tracker.doMarching = true;
       // random = pow(random, 2.2f); // not sure if this is needed or not...
     }  
     else {
       random = float3(lcg_randomf(rng), lcg_randomf(rng), lcg_randomf(rng));
+      tracker.doMarching = false;
+      tracker.rng = rng;
     }
 
 
@@ -433,7 +388,13 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         tracker.shadowRay = true;
         // tracker.random = random.y;
         // tracker.unit = record.rbfRadius * .5; //record.shadowUnit;
-        tracker.t = record.unit * random.z; //record.rbfRadius * .5f;// * .001f + record.jitter * record.rbfRadius * random.y;
+        if (record.disableBlueNoise)
+        {
+          tracker.t = 0.f;
+        }
+        else {
+          tracker.t = -record.unit * random.z;
+        }
         dda3(ddaRay, tracker.dimensions, false, tracker);
 
         float ts = tracker.t;
