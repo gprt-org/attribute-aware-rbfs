@@ -15,6 +15,7 @@ if len(sys.argv) < 2:
     sys.exit(1)
 
 radii = []
+particles_per_leaf = []
 avg_render_times = []
 output_file = None
 
@@ -33,14 +34,18 @@ for arg in sys.argv[1:]:
             next(reader)
 
         radius = 0.0
+        ppl = 0
         for row in reader:
             radius = float(row[1])
-            render_times.append(float(row[2]))
+            ppl = int(row[2])
+            render_times.append(float(row[3]))
 
         avg = sum(render_times)/len(render_times)
-        #print(radius)
+        print(radius)
+        print(ppl)
         #print(avg)
         radii.append(radius)
+        particles_per_leaf.append(ppl)
         avg_render_times.append(avg)
 
 regions_color="#0571b0"

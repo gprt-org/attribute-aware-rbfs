@@ -1392,10 +1392,10 @@ int main(int argc, char *argv[])
     if (benchmark) {
       static int firstFrame = true;
       if (firstFrame) {
-        frameStats << "\"orbitID\"; \"RBF radius\"; \"frame time (sec.)\"; \"camera string\"\n";
+        frameStats << "\"orbitID\"; \"RBF radius\"; \"Particles per leaf\"; \"frame time (sec.)\"; \"camera string\"\n";
         firstFrame = false;
       }
-      frameStats << currentOrbitPos << ';' << rbfRadius << ';' << profile << ';';
+      frameStats << currentOrbitPos << ';' << rbfRadius << ';' << particlesPerLeaf << ';' << profile << ';';
       frameStats << "\"--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
                                   << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
                                   << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
