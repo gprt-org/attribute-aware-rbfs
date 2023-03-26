@@ -1316,9 +1316,7 @@ int main(int argc, char *argv[])
     // if we need to, recompute majorants
     if (majorantsOutOfDate)
     {
-
       // gprtBufferClear(majorantVolume);
-
       // auto params = gprtComputeGetParameters<RayGenData>(ComputeMajorantGrid);
       // *params = raygenData;
       // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
