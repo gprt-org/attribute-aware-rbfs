@@ -29,8 +29,8 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  int frameId = record.frameID; // todo, change per frame
-  LCGRand rng = get_rng(frameId, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+  int accumID = record.accumID; // todo, change per frame
+  LCGRand rng = get_rng(accumID, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
   
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
@@ -166,7 +166,7 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
   color = over(color, backgroundColor);
 
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
-  float4 finalColor = (1.f / float(frameId)) * color + (float(frameId - 1) / float(frameId)) * prevColor;
+  float4 finalColor = (1.f / float(accumID)) * color + (float(accumID - 1) / float(accumID)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
   gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));

@@ -79,15 +79,15 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-// uint32_t particlesPerLeaf = 4;
-uint32_t particlesPerLeaf = 16;
+// uint32_t particlesPerLeaf = 16;
+uint32_t particlesPerLeaf = 1;
 // float rbfRadius = .01f; //3.f;
 // float rbfRadius = 3.f; // 3.f;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
 uint32_t structuredGridResolution = 64;
-uint32_t ddaGridResolution = 64;
+uint32_t ddaGridResolution = 1;
 
 static std::vector<std::string> string_split(std::string s, char delim) {
   std::vector<std::string> result;
@@ -525,6 +525,7 @@ int main(int argc, char *argv[])
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
+  uint32_t accumID = 1;
   uint32_t frameID = 1;
 
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
@@ -535,6 +536,7 @@ int main(int argc, char *argv[])
   int previousParticleFrame = -1;
   float previousParticleRadius = 0.001f * diagonal;
   bool renderAnimation = false;
+  bool playAnimation = false;
   static bool disableBlueNoise = false;
   do
   {
@@ -551,29 +553,42 @@ int main(int argc, char *argv[])
     #else
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
+    if (ImGui::Button("Play Animation")) {
+      playAnimation = true;
+    }
+    if (ImGui::Button("Pause Animation")) {
+      playAnimation = false;
+    }
+
+    if (playAnimation) {
+      particleFrame++;
+      if (particleFrame >= particles.size()) particleFrame = 1;
+      accumID = 1;
+    }
+
     if (ImGui::Button("Render Animation")) {
       renderAnimation = true;
       particleFrame = 0;
-      frameID = 1;
+      accumID = 1;
     }
 
     if (renderAnimation) {
       std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
       if (!disableBlueNoise)
-      text += std::to_string(frameID) + " / 64"; 
+      text += std::to_string(accumID) + " / 64"; 
       else
-      text += std::to_string(frameID) + " / 256"; 
+      text += std::to_string(accumID) + " / 256"; 
 
       ImGui::Text(text.c_str());
 
 
-      if ((!disableBlueNoise && frameID == 64) || frameID == 256) {
+      if ((!disableBlueNoise && accumID == 64) || accumID == 256) {
         std::string numberStr = std::to_string(particleFrame);
         auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
         gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
 
         particleFrame++;
-        frameID = 1;
+        accumID = 1;
         if (particleFrame == particles.size()) {
           renderAnimation = false;
           particleFrame = 0;
@@ -618,7 +633,7 @@ int main(int argc, char *argv[])
         ptr[i * 4 + 3] = make_8bit(result.w);
       }
 
-      frameID = 1;
+      accumID = 1;
       voxelized = false;
       majorantsOutOfDate = true;
       gprtTextureUnmap(colormap);
@@ -646,7 +661,7 @@ int main(int argc, char *argv[])
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
-      frameID = 1;
+      accumID = 1;
       voxelized = false;
       majorantsOutOfDate = true;
       gprtTextureUnmap(radiusmap);
@@ -672,7 +687,7 @@ int main(int argc, char *argv[])
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
-      frameID = 1;
+      accumID = 1;
       voxelized = false;
       majorantsOutOfDate = true;
       gprtTextureUnmap(densitymap);
@@ -685,13 +700,13 @@ int main(int argc, char *argv[])
       particleRecord->disableColorCorrection = disableColorCorrection;
       raygenData.disableColorCorrection = disableColorCorrection;
       voxelized = false;
-      frameID = 1;
+      accumID = 1;
     }
 
     if (ImGui::Checkbox("Disable Blue Noise", &disableBlueNoise)) {
       raygenData.disableBlueNoise = disableBlueNoise;
       voxelized = false;
-      frameID = 1;
+      accumID = 1;
     }
 
     if (ImGui::Button("Save screenshot"))
@@ -728,11 +743,11 @@ int main(int argc, char *argv[])
     //
     #else
     if (ImGui::RadioButton("Splatting", &mode, 0))
-      frameID = 1;
+      accumID = 1;
     if (ImGui::RadioButton("RBF Query", &mode, 1))
-      frameID = 1;
+      accumID = 1;
     if (ImGui::RadioButton("Voxelized", &mode, 2))
-      frameID = 1;
+      accumID = 1;
     #endif
 
 
@@ -858,7 +873,7 @@ int main(int argc, char *argv[])
                                      raygenData.camera.dir_dv.y,
                                      raygenData.camera.dir_dv.z);
 
-      frameID = 1;
+      accumID = 1;
     }
 
     #ifndef HEADLESS
@@ -883,7 +898,7 @@ int main(int argc, char *argv[])
 
       raygenData.camera.pos = lookFrom;
 
-      frameID = 1;
+      accumID = 1;
     }
     #endif
 
@@ -916,33 +931,37 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
 
-      frameID = 1;
+      accumID = 1;
     }
     #endif
 
-    static float sigma = 4.f;
+    static float sigma = 3.f;
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius;
+    static float jitter = 1.f;
     ini.get_float("sigma", sigma);
     ini.get_float("clampMaxCumulativeValue", sigma);
     ini.get_float("unit", unit);
+    ini.get_float("jitter", jitter);
     #ifndef HEADLESS
     if (ImGui::DragFloat("clamp max cumulative value",
                            &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
     {
-      frameID = 1;
+      accumID = 1;
       majorantsOutOfDate = true;
       voxelized = false;
     }
     if (ImGui::DragFloat("gaussian sigma",
                            &sigma, 1.f, 0.f, 100.f))
     {
-      frameID = 1;
+      accumID = 1;
       majorantsOutOfDate = true;
       voxelized = false;
     }
-    if (ImGui::InputFloat("delta tracking unit value", &unit))
-      frameID = 1;
+    if (ImGui::InputFloat("step size", &unit, 0.0f, 0.0f, "%.4f"))
+      accumID = 1;
+    if (ImGui::InputFloat("jitter", &jitter, 0.0f, 0.0f, "%.4f"))
+      accumID = 1;
     #endif
 
     static bool visualizeAttributes = true;
@@ -950,13 +969,13 @@ int main(int argc, char *argv[])
     #ifndef HEADLESS
     if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes))
     {
-      frameID = 1;
+      accumID = 1;
       // majorantsOutOfDate = true; // might do this later...
       voxelized = false;
     }
     #endif
 
-    unit = std::max(unit, .001f);
+    unit = std::max(unit, .0001f);
     static float azimuth = 0.f;
     static float elevation = 0.f;
     static float ambient = .5f;
@@ -968,11 +987,11 @@ int main(int argc, char *argv[])
     //
     #else
     if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
-      frameID = 1;
+      accumID = 1;
     if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
-      frameID = 1;
+      accumID = 1;
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
-      frameID = 1;
+      accumID = 1;
     ImGui::EndFrame();
     #endif
 
@@ -985,6 +1004,7 @@ int main(int argc, char *argv[])
     raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
     raygenData.sigma = sigma;
     raygenData.unit = unit;
+    raygenData.jitter = jitter;
     raygenData.visualizeAttributes = visualizeAttributes;
     raygenData.useDDA = useDDA;
     raygenData.showHeatmap = showHeatmap;
@@ -1055,7 +1075,7 @@ int main(int argc, char *argv[])
     }
 
     if (previousParticleFrame != particleFrame) {    
-      std::cout<<"Num particles "<< particles[particleFrame].size();
+      // std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord->numParticles = particles[particleFrame].size();
       particleRecord->rbfRadius = previousParticleRadius;
       raygenData.numParticles = particles[particleFrame].size();
@@ -1083,19 +1103,19 @@ int main(int argc, char *argv[])
 
       // compute minmax ranges
       {
-        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
-        *params = raygenData;
-        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+        // auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        // *params = raygenData;
+        // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
-        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-        gprtBufferClear(minMaxVolume);
-        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
-        std::cout << "- Done!" << std::endl;
+        // uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        // gprtBufferClear(minMaxVolume);
+        // gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        // std::cout << "- Done!" << std::endl;
       }
       
       voxelized = false;
       majorantsOutOfDate = true;
-      frameID = 1;
+      accumID = 1;
       previousParticleFrame = particleFrame;
     }
 
@@ -1117,22 +1137,22 @@ int main(int argc, char *argv[])
 
       // compute minmax ranges
       {
-        std::cout << "Computing minmax ranges" << std::endl;
-        // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
-        auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
-        *params = raygenData;
-        gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+        // std::cout << "Computing minmax ranges" << std::endl;
+        // // auto params1 = gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid);
+        // auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
+        // *params = raygenData;
+        // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
-        uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-        // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
-        gprtBufferClear(minMaxVolume);
-        gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
-        std::cout << "- Done!" << std::endl;
+        // uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+        // // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
+        // gprtBufferClear(minMaxVolume);
+        // gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
+        // std::cout << "- Done!" << std::endl;
       }
       
       voxelized = false;
       majorantsOutOfDate = true;
-      frameID = 1;
+      accumID = 1;
       previousParticleRadius = rbfRadius;
     }
 
@@ -1156,14 +1176,14 @@ int main(int argc, char *argv[])
     if (majorantsOutOfDate)
     {
 
-      gprtBufferClear(majorantVolume);
+      // gprtBufferClear(majorantVolume);
 
-      auto params = gprtComputeGetParameters<RayGenData>(ComputeMajorantGrid);
-      *params = raygenData;
-      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-      uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-      gprtComputeLaunch1D(context, ComputeMajorantGrid, numVoxels);
-      majorantsOutOfDate = false;
+      // auto params = gprtComputeGetParameters<RayGenData>(ComputeMajorantGrid);
+      // *params = raygenData;
+      // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+      // uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
+      // gprtComputeLaunch1D(context, ComputeMajorantGrid, numVoxels);
+      // majorantsOutOfDate = false;
     }
 
     #ifndef HEADLESS
@@ -1174,6 +1194,7 @@ int main(int argc, char *argv[])
 
     gprtBeginProfile(context);
 
+    raygenData.accumID = accumID;
     raygenData.frameID = frameID;
 
     // copy raygen params
@@ -1210,6 +1231,7 @@ int main(int argc, char *argv[])
     gprtBufferPresent(context, frameBuffer);
     #endif
 
+    accumID ++;;
     frameID ++;;
 
     // Clear .ini file so we don't read entries from it

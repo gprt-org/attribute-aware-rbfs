@@ -57,6 +57,7 @@ struct RayGenData {
   alignas(16) gprt::Buffer imageBuffer;
   alignas(16) gprt::Buffer accumBuffer;
   alignas(16) gprt::Buffer stbnBuffer;
+  alignas(4) uint32_t accumID;
   alignas(4) uint32_t frameID;
 
   alignas(16) gprt::Accel world;
@@ -90,6 +91,9 @@ struct RayGenData {
   // For controling the relative density of delta tracking
   alignas(4) float unit;
 
+  // How much to jitter ray marching to reduce step artifacts
+  alignas(4) float jitter;
+  
   // A switch to visualize either RBF density or per-particle attributes
   alignas(4) int visualizeAttributes;
 

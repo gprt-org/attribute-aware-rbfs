@@ -73,10 +73,10 @@ class ParticleTracker {
     );
 
     // skip to the next cell
-    if (majorant <= 0.f) {
-      t = t1;
-      return true; 
-    }
+    // if (majorant <= 0.f) {
+    //   t = t1;
+    //   return true; 
+    // }
 
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
@@ -254,13 +254,17 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  int frameId = record.frameID; // todo, change per frame
-  LCGRand rng = get_rng(frameId, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+  int accumID = record.accumID;
+  int frameID = record.frameID;
+
+  LCGRand rng = get_rng(frameID, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
 
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
   float3 rt = record.globalAABBMax + record.rbfRadius;
   float3 lb = record.globalAABBMin - record.rbfRadius;
+
+  float diagonal = length(rt - lb);
 
   RayDesc rayDesc;
   rayDesc.Origin = record.camera.pos;
@@ -291,7 +295,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   float4 sppColor = float4(0.f, 0.f, 0.f, 0.f);
   for (int sppi = 0; sppi < record.spp; ++sppi) {
 
-    gprt::Texture stbnHandle = gprt::load<gprt::Texture>(record.stbnBuffer, (frameId * record.spp + sppi) % 64);
+    gprt::Texture stbnHandle = gprt::load<gprt::Texture>(record.stbnBuffer, (frameID * record.spp + sppi) % 64);
     Texture2D stbn = gprt::getTexture2DHandle(stbnHandle);
 
     if (!record.disableBlueNoise) {
@@ -302,13 +306,14 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       random = float3(lcg_randomf(rng), lcg_randomf(rng), lcg_randomf(rng));
     }
 
-    tracker.random = random.x;  
+
     tracker.disableColorCorrection = record.disableColorCorrection;
     tracker.majorants = record.majorants;
     tracker.dimensions = record.ddaDimensions;
     tracker.i = 0;
     tracker.RHS = 0;
-    tracker.unit = record.unit;
+    tracker.random = random.x;  
+    tracker.unit = record.unit;// + record.jitter * record.rbfRadius * random.z;
     tracker.visualizeAttributes = record.visualizeAttributes;
     tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
     tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
@@ -339,7 +344,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       ddaRay.Direction = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
       ddaRay.TMin = 0.f;
       ddaRay.TMax = texit;
-      tracker.t = tenter + lcg_randomf(rng) * record.unit;
+      tracker.t = tenter; // + lcg_randomf(rng) * record.rbfRadius;
       dda3(ddaRay, tracker.dimensions, false, tracker);
 
       // tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
@@ -366,13 +371,14 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         ddaRay.Direction = worldDirToGrid(shadowRay.Direction, lb, rt, tracker.dimensions);
         ddaRay.TMin = 0.f;
         ddaRay.TMax = shadowTExit;
-        tracker.t = lcg_randomf(rng) * record.unit;
         //tracker.t = 0.1f;
         tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
         tracker.dbg = false;
         tracker.RHS = 0;
-        tracker.random = random.y;
         tracker.shadowRay = true;
+        // tracker.random = random.y;
+        // tracker.unit = record.rbfRadius * .5; //record.shadowUnit;
+        tracker.t = record.jitter; //record.rbfRadius * .001f + record.jitter * record.rbfRadius * random.y;
         dda3(ddaRay, tracker.dimensions, false, tracker);
 
         float ts = tracker.t;
@@ -402,8 +408,12 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
   sppColor = over(sppColor, backgroundColor);
 
+  // if (!record.disableBlueNoise) {
+  //   accumID = 4;//min(accumID, 64);
+  // }
+
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
-  float4 finalColor = (1.f / float(frameId)) * sppColor + (float(frameId - 1) / float(frameId)) * prevColor;
+  float4 finalColor = (1.f / float(accumID)) * sppColor + (float(accumID - 1) / float(accumID)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
   // exposure and gamma

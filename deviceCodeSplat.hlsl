@@ -59,8 +59,8 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
-  int frameId = record.frameID; // todo, change per frame
-  LCGRand rng = get_rng(frameId, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
+  int accumID = record.accumID; // todo, change per frame
+  LCGRand rng = get_rng(accumID, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
   
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
