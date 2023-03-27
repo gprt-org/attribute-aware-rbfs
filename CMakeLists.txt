@@ -24,6 +24,23 @@ if (${BUILD_GENERICIO})
 add_subdirectory(3rdParty/genericio)
 endif()
 
+option(USE_VTK "Use VTK to load the FPM data from Sci-Vis Contest 2016" ON)
+if (USE_VTK)
+find_package(VTK COMPONENTS
+  vtkCommonColor
+  vtkCommonCore
+  vtkIOXML
+  vtkInteractionStyle
+  vtkRenderingCore
+  vtkCommonDataModel
+  vtkIOLegacy
+  vtkRenderingFreeType
+  vtkRenderingOpenGL2 QUIET)
+include(${VTK_USE_FILE})
+else()
+message(WARNING "VTK not found!")
+endif()
+
 embed_devicecode(
   OUTPUT_TARGET
     deviceCodeCommon
@@ -53,6 +70,7 @@ embed_devicecode(
 )
 
 set(LIBRARIES 
+  ${LIBRARIES}
   deviceCodeCommon 
   deviceCodeSplat 
   deviceCodeRBF
@@ -63,8 +81,15 @@ set(LIBRARIES
 )
 set(COMPILE_DEFINITIONS)
 
-add_executable(viewer hostCode.cpp IniFile.cpp)
-add_executable(viewer-headless hostCode.cpp IniFile.cpp)
+set(SOURCES
+  hostCode.cpp
+  IniFile.cpp
+  importers/import_vtk.cpp
+)
+add_executable(viewer)
+target_sources(viewer PRIVATE ${SOURCES})
+add_executable(viewer-headless)
+target_sources(viewer-headless PRIVATE ${SOURCES})
 
 if (${BUILD_ARBORX})
 set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
@@ -79,6 +104,11 @@ endif()
 if (${BUILD_GENERICIO})
 set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DGENERICIO)
 set(LIBRARIES ${LIBRARIES} genericio)
+endif()
+
+if (USE_VTK)
+set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DVTK)
+set(LIBRARIES ${LIBRARIES} ${VTK_LIBRARIES})
 endif()
 
 set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DSTBN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/stbn/")

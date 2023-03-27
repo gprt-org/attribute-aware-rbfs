@@ -47,6 +47,7 @@
 #include "importers/import_points.h"
 #include "importers/import_arborx.h"
 #include "importers/import_mmpld.h"
+#include "importers/import_vtk.h"
 #include "IniFile.h"
 #include <argparse/argparse.hpp>
 
@@ -112,6 +113,9 @@ int main(int argc, char *argv[])
       .default_value("");
   program.add_argument("--mmpld")
       .help("A path to a MMPLD dataset (ending in .mmpld)")
+      .default_value("");
+  program.add_argument("--vtk")
+      .help("A path to a folder containing .vtu files")
       .default_value("");
   program.add_argument("--points")
       .help("A path to our custom points dataset (ending in .points)")
@@ -181,6 +185,7 @@ int main(int argc, char *argv[])
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
   std::string pointsPath = program.get<std::string>("--points");
+  std::string vtkPath = program.get<std::string>("--vtk");
   bool synthetic = false;
   if (dbscanPath != "")
     importArborX(dbscanPath, particleData);
@@ -188,6 +193,8 @@ int main(int argc, char *argv[])
     importMMPLD(mmpldPath, particleData);
   else if (pointsPath != "")
     importPoints(pointsPath, particleData);
+  else if (vtkPath != "")
+    importVTK(vtkPath, particleData);
   else
   {
     synthetic = true;
