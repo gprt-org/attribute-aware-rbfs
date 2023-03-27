@@ -642,6 +642,7 @@ int main(int argc, char *argv[])
   float previousParticleRadius = 0.001f * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool renderAnimation = false;
+  int samplesPerAnimationFrame = 64;
   bool playAnimation = false;
   static bool disableBlueNoise = false;
   std::stringstream frameStats;
@@ -674,6 +675,8 @@ int main(int argc, char *argv[])
       accumID = 1;
     }
 
+    ImGui::InputInt("samplesPerAnimationFrame", &samplesPerAnimationFrame);
+
     if (ImGui::Button("Render Animation")) {
       renderAnimation = true;
       particleFrame = 0;
@@ -682,15 +685,11 @@ int main(int argc, char *argv[])
 
     if (renderAnimation) {
       std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
-      if (!disableBlueNoise)
-      text += std::to_string(accumID) + " / 64"; 
-      else
-      text += std::to_string(accumID) + " / 256"; 
-
+      text += std::to_string(accumID) + " / " + std::to_string(samplesPerAnimationFrame); 
       ImGui::Text(text.c_str());
 
 
-      if ((!disableBlueNoise && accumID == 64) || accumID == 256) {
+      if (accumID == (samplesPerAnimationFrame + 1)) {
         std::string numberStr = std::to_string(particleFrame);
         auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
         gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
