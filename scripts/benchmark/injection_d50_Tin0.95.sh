@@ -16,9 +16,6 @@ orbit_radius="--orbit-radius 400"
 rbegin=0.1
 rend=5.0
 rinc=0.1
-pplbegin=1
-pplend=32
-pplinc=1
 
 ##
 scriptdir="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"
@@ -49,7 +46,7 @@ mkdir -p varying-ppl
 cp ${scriptdir}/${name}.ini ${outdir}/varying-ppl/viewer.ini
 cd varying-ppl
 echo "Running varying-ppl benchmark in: "$PWD
-for ppl in $(seq ${pplbegin} ${pplinc} ${pplend})
+for ppl in 1 2 4 8 16
 do
   ${bindir}/viewer-headless             \
             ${data}                     \
