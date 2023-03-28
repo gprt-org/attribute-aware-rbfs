@@ -134,7 +134,7 @@ class ParticleTracker {
       );
 
 
-      if (payload.count > 0) {
+      if (payload.count > 0 && payload.density > 0.f) {
         payload.color /= payload.density;
         if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
       }
@@ -489,6 +489,12 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   float4 color = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f);
+
+  // transparent particle
+  if (color.w == 0.f) {
+    gprt::ignoreHit();
+    return;
+  }
   
   payload.count += 1;
   payload.density += hit_particle.density * pow(color.w, 3);

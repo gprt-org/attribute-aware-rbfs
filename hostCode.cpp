@@ -1095,7 +1095,7 @@ int main(int argc, char *argv[])
     static float unit = previousParticleRadius;
     static float jitter = 1.f;
     ini.get_float("sigma", sigma);
-    ini.get_float("clampMaxCumulativeValue", sigma);
+    ini.get_float("clampMaxCumulativeValue", clampMaxCumulativeValue);
     ini.get_float("unit", unit);
     ini.get_float("jitter", jitter);
     #ifndef HEADLESS
