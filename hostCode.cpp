@@ -48,6 +48,7 @@
 #include "importers/import_arborx.h"
 #include "importers/import_mmpld.h"
 #include "importers/import_vtk.h"
+#include "importers/import_cosmo.h"
 #include "IniFile.h"
 #include <argparse/argparse.hpp>
 
@@ -120,6 +121,9 @@ int main(int argc, char *argv[])
   program.add_argument("--points")
       .help("A path to our custom points dataset (ending in .points)")
       .default_value("");
+  program.add_argument("--cosmo")
+      .help("A path to a directory containing .cosmo.* files")
+      .default_value("");
 
   program.add_argument("--camera")
     .nargs(10)
@@ -185,6 +189,7 @@ int main(int argc, char *argv[])
   std::string dbscanPath = program.get<std::string>("--dbscan");
   std::string mmpldPath = program.get<std::string>("--mmpld");
   std::string pointsPath = program.get<std::string>("--points");
+  std::string cosmoDir = program.get<std::string>("--cosmo");
   std::string vtkPath = program.get<std::string>("--vtk");
   bool synthetic = false;
   if (dbscanPath != "")
@@ -195,6 +200,8 @@ int main(int argc, char *argv[])
     importPoints(pointsPath, particleData);
   else if (vtkPath != "")
     importVTK(vtkPath, particleData);
+  else if (cosmoDir != "")
+    importCosmo(cosmoDir, particleData);
   else
   {
     synthetic = true;
