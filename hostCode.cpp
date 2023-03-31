@@ -1412,14 +1412,14 @@ int main(int argc, char *argv[])
     gprtGuiRasterize(context);
     #endif
 
-    gprtBeginProfile(context);
-
     raygenData.accumID = accumID;
     raygenData.frameID = frameID;
 
     // copy raygen params
     *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
+
+    gprtBeginProfile(context);
 
     switch (mode)
     {
