@@ -1474,7 +1474,7 @@ int main(int argc, char *argv[])
       static int firstFrame = true;
       if (firstFrame) {
         frameStats << "\"orbitID\"; \"RBF radius\"; \"Particles per leaf\"; ";
-        frameStats << "\"frame time (sec.)\"; \"hilbert time (sec.)\"; \"sort time (sec.)\"; \"value range time (sec.)\"; \"accel build time (sec.)\"; ";
+        frameStats << "\"frame time (sec.)\"; \"hilbert time (sec.)\"; \"sort time (sec.)\"; \"value range time (sec.)\"; \"accel build time (sec.)\"; \"accel update time (sec.)\"; ";
         frameStats << "\"camera string\"\n";
         firstFrame = false;
       }
