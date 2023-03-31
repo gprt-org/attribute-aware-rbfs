@@ -354,7 +354,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       ddaRay.Direction = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
       ddaRay.TMin = 0.f;
       ddaRay.TMax = texit;
-      tracker.t = tenter + record.unit * random.y; // + lcg_randomf(rng) * record.rbfRadius;
+      tracker.t = tenter + record.unit * random.y * record.jitter; // + lcg_randomf(rng) * record.rbfRadius;
       dda3(ddaRay, tracker.dimensions, false, tracker);
 
       // tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
@@ -393,7 +393,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
           tracker.t = 0.f;
         }
         else {
-          tracker.t = -record.unit * random.z;
+          tracker.t = -record.unit * random.z * record.jitter;
         }
         dda3(ddaRay, tracker.dimensions, false, tracker);
 
@@ -420,7 +420,9 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
 
   // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  
+  float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f);
+  // float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);
 
   sppColor = over(sppColor, backgroundColor);
 

@@ -1,22 +1,22 @@
 #!/bin/bash
 
 # don't change:
-name="boiler"
+name="cosmology"
 
 #
 # USER SET:
 #
 bindir=/home/natevm/git/point-clouds/build
 outdir=/home/natevm/git/point-clouds-benchmarks/${name}
-data="--points /home/natevm/data/points/boiler/uintah"
+data="--cosmo /home/natevm/data/scivis2019/"
 orbit_count="--orbit 50"
-orbit_center="--orbit-center 0.330088 0.300472 0.299148"
-orbit_up="--orbit-up 0 -1 0"
-orbit_radius="--orbit-radius 0.3"
-rbegin=0.00007
-rend=0.004
+orbit_center="--orbit-center 32 32 31.9997"
+orbit_up="--orbit-up 0 0 -1"
+orbit_radius="--orbit-radius 100"
+rbegin=0.1
+rend=1.0
 # note, 50 steps
-rinc=0.0000786
+rinc=0.018
 
 ##
 scriptdir="$( cd -- "$(dirname "$0")" >/dev/null 2>&1 ; pwd -P )"

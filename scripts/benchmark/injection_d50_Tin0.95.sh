@@ -6,9 +6,9 @@ name="injection_d50_Tin0.95"
 #
 # USER SET:
 #
-bindir=/home/szellmann/point-clouds/build
-outdir=/home/szellmann/point-clouds-benchmarks/${name}
-data="--mmpld /home/szellmann/Downloads/injection_d50_Tin0.95_Tout1.05_vfeed0.002.tiff"
+bindir=/home/natevm/git/point-clouds/build
+outdir=/home/natevm/git/point-clouds-benchmarks/${name}
+data="--mmpld /home/natevm/data/stuttgart/injection_d50_Tin0.95_Tout1.05_vfeed0.002.mmpld"
 orbit_count="--orbit 50"
 orbit_center="--orbit-center 100 197.501 100"
 orbit_up="--orbit-up 0 -1 0"

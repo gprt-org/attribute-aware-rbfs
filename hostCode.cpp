@@ -90,7 +90,7 @@ uint32_t particlesPerLeaf = 1;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
-uint32_t structuredGridResolution = 64;
+uint32_t structuredGridResolution = 32;
 uint32_t ddaGridResolution = 1;
 
 static std::vector<std::string> string_split(std::string s, char delim) {
@@ -170,6 +170,8 @@ int main(int argc, char *argv[])
     .implicit_value(true);
   #endif
 
+  std::cout<<"Particles per leaf: " << particlesPerLeaf << std::endl;
+
   try {
     program.parse_args(argc, argv);
   }
@@ -192,35 +194,77 @@ int main(int argc, char *argv[])
   std::string cosmoDir = program.get<std::string>("--cosmo");
   std::string vtkPath = program.get<std::string>("--vtk");
   bool synthetic = false;
-  if (dbscanPath != "")
+  if (dbscanPath != "") {
+    std::cout<< "loading " <<dbscanPath<<std::endl;
     importArborX(dbscanPath, particleData);
-  else if (mmpldPath != "")
+  }
+  else if (mmpldPath != "") {
+    std::cout<< "loading " <<mmpldPath<<std::endl;
     importMMPLD(mmpldPath, particleData);
-  else if (pointsPath != "")
+  }
+  else if (pointsPath != "") {
+    std::cout<< "loading " <<pointsPath<<std::endl;
     importPoints(pointsPath, particleData);
-  else if (vtkPath != "")
+  }
+  else if (vtkPath != "") {
+    std::cout<< "loading " <<vtkPath<<std::endl;
     importVTK(vtkPath, particleData);
-  else if (cosmoDir != "")
+  }
+  else if (cosmoDir != "") {
+    std::cout<< "loading " <<cosmoDir<<std::endl;
     importCosmo(cosmoDir, particleData);
+  }
   else
   {
     synthetic = true;
     ddaGridResolution = 1;
     particleData.resize(180);
-    for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
-      particleData[frame].resize(2);
-      for (uint32_t i = 0; i < particleData[frame].size(); ++i)
-      {
-        float t1 = float(i) / float(particleData[frame].size());
+    // for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+    //   particleData[frame].resize(2);
+    //   for (uint32_t i = 0; i < particleData[frame].size(); ++i)
+    //   {
+    //     float t1 = float(i) / float(particleData[frame].size());
         
+    //     float t2 = 2.f * ( float(frame) / float(particleData.size()) );
+
+    //     particleData[frame][i].second = float4(
+    //       (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
+    //       (cos(t2 * 3.14) * .5 + .5) * cos(t1 * 2.f * 3.14f),
+    //       0.f, t1);
+    //   }
+    // }
+
+
+    float gr = 1.61803398875;
+    for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+      float r = 1;
+      particleData[frame].resize(20*20*20);
+      for (int z = 0; z < 20; ++z) {
+      for (int y = 0; y < 20; ++y) {
+      for (int x = 0; x < 20; ++x) {
+        uint32_t i = x + y * 20 + z * 20 * 20;
+        float t1 = float(i) / float(particleData[frame].size());
         float t2 = 2.f * ( float(frame) / float(particleData.size()) );
 
         particleData[frame][i].second = float4(
-          (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
-          (cos(t2 * 3.14) * .5 + .5) * cos(t1 * 2.f * 3.14f),
-          0.f, t1);
+          t2 * ((x - 10.f) / 20.f),
+          t2 * ((y - 10.f) / 20.f),
+          t2 * ((z - 10.f) / 20.f),
+        t1);
       }
+      }
+      }
+
+      // for (uint32_t i = 0; i < particleData[frame].size(); ++i)
+      // {
+
+          // (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
+          // (cos(t2 * 3.14) * .5 + .5) * cos(t1 * 2.f * 3.14f), 
+          
+      // }
     }
+
+    
   }
 
   float3 aabb[2] = {
@@ -270,8 +314,8 @@ int main(int argc, char *argv[])
     lookFrom = aabb[1];
 
     if (synthetic) {
-      lookAt = {0.f, 0.f, -1.f};
-      lookFrom = {0.f, 0.f, 0.f};
+      lookAt = {0.f, 0.f, 0.f};
+      lookFrom = {0.f, 0.f, -1.f};
     }
   }
 
@@ -706,7 +750,7 @@ int main(int argc, char *argv[])
       if (accumID == (samplesPerAnimationFrame + 1)) {
         std::string numberStr = std::to_string(particleFrame);
         auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
-        gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./image" + new_str + ".png").c_str());
+        gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./1image" + new_str + ".png").c_str());
 
         particleFrame++;
         accumID = 1;
@@ -848,7 +892,7 @@ int main(int argc, char *argv[])
     ini.get_float("gamma", gamma);
     ini.get_int32("spp", spp);
     #ifndef HEADLESS
-    ImGui::DragInt("Samples", &spp, 1, 1, 32);
+    ImGui::DragInt("Samples", &spp, 1, 1, 64);
     ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
     ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
     #endif
@@ -1262,6 +1306,12 @@ int main(int argc, char *argv[])
       // Now we can build the tree
       double beforeAccelBuild = getCurrentTime();
       gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+      size_t particleSize = gprtBufferGetSize(particleBuffer);
+      size_t aabbSize = gprtBufferGetSize(aabbBuffer);
+      size_t accelSize = gprtAccelGetSize(particleAccel);
+      std::cout<<"Particle Buffer Size " << particleSize << std::endl;
+      std::cout<<"AABB Buffer Size " << aabbSize << std::endl;
+      std::cout<<"Accel Size " << accelSize << std::endl;
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
       double afterAccelBuild = getCurrentTime();
       accelBuildTime = afterAccelBuild-beforeAccelBuild;
@@ -1401,7 +1451,7 @@ int main(int argc, char *argv[])
       sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
     printf("%s\r\n", title);
     fflush(stdout);
-    gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
+    // gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
     #else
     gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);

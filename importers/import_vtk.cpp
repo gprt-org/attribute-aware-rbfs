@@ -38,6 +38,7 @@ void importVTK(std::string vtkPath, std::vector<std::vector<std::pair<uint64_t, 
     //std::cout << "\n";
 
     int numPoints = ug->GetNumberOfPoints();
+    std::cout<<"Num points "<< numPoints << std::endl;
     if (numPoints > 0) {
       particleData.emplace_back(std::vector<std::pair<uint64_t, float4>>(numPoints));
       auto &particles = particleData.back();

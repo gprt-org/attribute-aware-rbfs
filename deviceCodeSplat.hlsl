@@ -88,13 +88,13 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   int visualizeAttributes = record.visualizeAttributes;
 
-  float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
+  float4 result_color = float4(1.f, 1.f, 1.f, 0.f);
   if (tenter < texit) {
-    const float slab_spacing = particlesPerSlab * radius;
+    const float slab_spacing = particlesPerSlab * record.unit;
     float tslab = 0.f;
     
     while (tslab < texit) {
-      if (result_color.a > 0.97f) break;
+      if (result_color.a > 0.99f) break;
 
       SplatPayload payload;
       payload.tail = 0;
@@ -120,7 +120,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         for (int i = 0; i < payload.tail; ++i) {
           float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma);
+          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma - 1.f);
           if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
 
           float4 color;
@@ -133,10 +133,12 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
             color.rgb = colormap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).rgb;
             color.w = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).r;
           }
+
+          result_color = over(result_color, color);
            
-          float alpha_1msa = color.a * (1.0 - result_color.a);
-          result_color.rgb += alpha_1msa * color.rgb;
-          result_color.a += alpha_1msa;
+          // float alpha_1msa = color.a * (1.0 - result_color.a);
+          // result_color.rgb += alpha_1msa * color.rgb;
+          // result_color.a += alpha_1msa;
         }
       }
       tslab += slab_spacing;
@@ -146,6 +148,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
   // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
   float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f);//(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  // float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);//(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
 
   result_color = over(result_color, backgroundColor);
 

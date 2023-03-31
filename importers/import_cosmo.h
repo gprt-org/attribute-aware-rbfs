@@ -69,6 +69,8 @@ void importCosmo(std::string path, std::vector<std::vector<std::pair<uint64_t, f
     particleData.resize(cosmos.size());
 
 
+    float minimum = 1e20f;
+    float maximum = -1e20f;
     for (uint32_t fid = 0; fid < cosmos.size(); ++fid) {
         std::cout<<cosmos[fid]<<std::endl;
 
@@ -108,7 +110,12 @@ void importCosmo(std::string path, std::vector<std::vector<std::pair<uint64_t, f
             float mu;
             float rho;
             float phi;
-​
+
+            uu is basically energy/temperature
+            hh is an interaction distance of the particle
+            mu is the molecular weight (probably a single value if its an old sim)
+            rho is density
+            and phi is gravitational potential​
 ​
             // particle ID and mask
             int64_t id;

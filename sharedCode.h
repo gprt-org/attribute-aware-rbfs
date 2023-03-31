@@ -154,6 +154,7 @@ float evaluate_rbf(float3 X, float3 P, float r, float sigma) {
 float4 over(float4 a, float4 b) {
   float4 result;
   result.a = a.a + b.a * (1.f - a.a);
+  if (result.a == 0.f) return a; // avoid NaN
   result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
   return result;
 }
