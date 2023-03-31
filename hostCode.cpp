@@ -104,6 +104,30 @@ static std::vector<std::string> string_split(std::string s, char delim) {
   return result;
 }
 
+// Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
+void pretty_bytes(uint bytes)
+{
+    const char* suffixes[7];
+    suffixes[0] = "B";
+    suffixes[1] = "KB";
+    suffixes[2] = "MB";
+    suffixes[3] = "GB";
+    suffixes[4] = "TB";
+    suffixes[5] = "PB";
+    suffixes[6] = "EB";
+    uint s = 0; // which suffix to use
+    double count = bytes;
+    while (count >= 1024 && s < 7)
+    {
+        s++;
+        count /= 1024;
+    }
+    if (count - floor(count) == 0.0)
+        printf("%d %s", (int)count, suffixes[s]);
+    else
+        printf("%.1f %s", count, suffixes[s]);
+}
+
 #include <iostream>
 int main(int argc, char *argv[])
 {
@@ -169,8 +193,6 @@ int main(int argc, char *argv[])
     .default_value(false)
     .implicit_value(true);
   #endif
-
-  std::cout<<"Particles per leaf: " << particlesPerLeaf << std::endl;
 
   try {
     program.parse_args(argc, argv);
@@ -266,6 +288,14 @@ int main(int argc, char *argv[])
 
     
   }
+
+  size_t totalParticles = 0;
+  for (size_t j = 0; j < particleData.size(); ++j) {
+    totalParticles += particleData[j].size();
+  }
+  std::cout<<"Total particles " << totalParticles << std::endl;
+  std::cout<<"Avg Particles Per Step " << totalParticles / float(particleData.size()) << std::endl;
+  std::cout<<"Num steps "<< particleData.size() << std::endl;;
 
   float3 aabb[2] = {
       {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
@@ -541,7 +571,8 @@ int main(int argc, char *argv[])
   ini.get_vec3f("color0", missData->color0.x, missData->color0.y, missData->color0.z, 0.1f, 0.1f, 0.1f);
   ini.get_vec3f("color1", missData->color1.x, missData->color1.y, missData->color1.z, 0.0f, 0.0f, 0.0f);
 
-  ini.get_uint32("particlesPerLeaf", particlesPerLeaf, 16);
+  ini.get_uint32("particlesPerLeaf", particlesPerLeaf, 1);
+  std::cout<<"Particles per leaf "<<particlesPerLeaf<<std::endl;
   uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
   // overwrites ini!
   if (particlesPerLeafArg > 0)
@@ -1282,8 +1313,10 @@ int main(int argc, char *argv[])
       std::cout << std::flush;
     }
 
+    bool forceRebuild = false;;
+
     double accelBuildTime = 0.0;
-    if (previousParticleFrame != particleFrame) {    
+    if (previousParticleFrame != particleFrame || forceRebuild) {    
       // std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord->numParticles = particles[particleFrame].size();
       particleRecord->rbfRadius = previousParticleRadius;
@@ -1309,12 +1342,14 @@ int main(int argc, char *argv[])
       size_t particleSize = gprtBufferGetSize(particleBuffer);
       size_t aabbSize = gprtBufferGetSize(aabbBuffer);
       size_t accelSize = gprtAccelGetSize(particleAccel);
-      std::cout<<"Particle Buffer Size " << particleSize << std::endl;
-      std::cout<<"AABB Buffer Size " << aabbSize << std::endl;
-      std::cout<<"Accel Size " << accelSize << std::endl;
+      std::cout<<"Particle Buffer Size "; pretty_bytes(particleSize); std::cout << std::endl;
+      std::cout<<"AABB Buffer Size " ; pretty_bytes(aabbSize); std::cout << std::endl;
+      std::cout<<"Accel Size " ; pretty_bytes(accelSize); std::cout << std::endl; 
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
       double afterAccelBuild = getCurrentTime();
       accelBuildTime = afterAccelBuild-beforeAccelBuild;
+
+      std::cout<<"accel build time "<< accelBuildTime * 1000 <<std::endl;
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
@@ -1338,7 +1373,7 @@ int main(int argc, char *argv[])
     }
 
     double accelUpdateTime = 0.0;
-    if (previousParticleRadius != rbfRadius || radiusEdited) {
+    if (previousParticleRadius != rbfRadius || radiusEdited || forceRebuild) {
       particleRecord->rbfRadius = rbfRadius;
       raygenData.rbfRadius = rbfRadius;
       *genRBFBoundsData = *particleRecord;
@@ -1353,6 +1388,8 @@ int main(int argc, char *argv[])
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
       double afterAccelUpdate = getCurrentTime();
       accelUpdateTime = afterAccelUpdate-beforeAccelUpdate;
+
+      std::cout<<"accel update time "<< accelUpdateTime * 1000 <<std::endl;
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);

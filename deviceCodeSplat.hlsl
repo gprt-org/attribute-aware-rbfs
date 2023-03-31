@@ -88,7 +88,8 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   int visualizeAttributes = record.visualizeAttributes;
 
-  float4 result_color = float4(1.f, 1.f, 1.f, 0.f);
+  // float4 result_color = float4(1.f, 1.f, 1.f, 0.f);
+  float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
   if (tenter < texit) {
     const float slab_spacing = particlesPerSlab * record.unit;
     float tslab = 0.f;
