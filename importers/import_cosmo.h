@@ -6,11 +6,11 @@
 #include <memory>
 #include <string>
 #include <vector>
-#include <glm/ext.hpp>
-#include <glm/glm.hpp>
+// #include <glm/ext.hpp>
+// #include <glm/glm.hpp>
 // #include "bat_file.h"
 // #include "borrowed_array.h"
-#include "file_mapping.h"
+// #include "file_mapping.h"
 // #include "lba_tree_builder.h"
 // #include "util.h"
 
@@ -64,7 +64,25 @@ void importCosmo(std::string path, std::vector<std::vector<std::pair<uint64_t, f
     }
 
     // load in alphabetical order
-    std::sort(cosmos.begin(), cosmos.end());
+    std::sort(cosmos.begin(), cosmos.end(),
+        [](std::string a, std::string b) {
+            fs::path pa(a);
+            fs::path pb(b);
+            std::string exta = pa.extension();
+            std::string extb = pb.extension();
+            exta.erase(0,1); // remove "."
+            extb.erase(0,1); //   (same)
+
+            while (exta.length() < extb.length()) {
+                exta = std::string("0")+exta;
+            }
+
+            while (extb.length() < exta.length()) {
+                extb = std::string("0")+extb;
+            }
+
+            return exta < extb;
+        });
 
     particleData.resize(cosmos.size());
 
