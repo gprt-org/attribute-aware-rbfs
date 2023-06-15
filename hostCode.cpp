@@ -558,7 +558,7 @@ int main(int argc, char *argv[])
   }
 
   if (dmMarks.empty()) {
-    dmMarks.push_back({0.f,{0.f,0.f,0.f,0.f}});
+    dmMarks.push_back({0.0f,{0.f,0.f,0.f,0.f}});
     dmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
   }
 
@@ -643,13 +643,9 @@ int main(int argc, char *argv[])
       uint8_t *ptr = gprtTextureGetPointer(colormap);
       for (uint32_t i = 0; i < 64; ++i)
       {
-        #ifdef HEADLESS
-        float4 result = colormapInterpol.at(i / 63.f);
-        #else
         auto result = colormapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
-        #endif
         ptr[i * 4 + 0] = make_8bit(pow(result.x, 1.f / 2.2f));
         ptr[i * 4 + 1] = make_8bit(pow(result.y, 1.f / 2.2f));
         ptr[i * 4 + 2] = make_8bit(pow(result.z, 1.f / 2.2f));
@@ -690,13 +686,10 @@ int main(int argc, char *argv[])
       uint8_t *ptr = gprtTextureGetPointer(densitymap);
       for (uint32_t i = 0; i < 64; ++i)
       {
-        #ifdef HEADLESS
-        float4 result = densitymapInterpol.at(i / 63.f);
-        #else
         auto result = densitymapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
-        #endif
+        std::cout<<"density "<<result.x<<std::endl;
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
@@ -773,7 +766,6 @@ int main(int argc, char *argv[])
     int x_state = gprtGetKey(context, GPRT_KEY_X);
     int y_state = gprtGetKey(context, GPRT_KEY_Y);
     int z_state = gprtGetKey(context, GPRT_KEY_Z);
-    int i_state = gprtGetKey(context, GPRT_KEY_I);
     int ctrl_state  = gprtGetKey(context, GPRT_KEY_LEFT_CONTROL);
     int left_shift  = gprtGetKey(context, GPRT_KEY_LEFT_SHIFT);
     int right_shift = gprtGetKey(context, GPRT_KEY_RIGHT_SHIFT);
@@ -1013,64 +1005,6 @@ int main(int argc, char *argv[])
     particleRecord.sigma = sigma;
     particleRecord.visualizeAttributes = visualizeAttributes;
 
-    // Shift-I prints an ini-file for the current program state
-    if (i_state && shift)
-    {
-      auto marksToString = [](const auto marks) {
-        std::stringstream stream;
-        stream << '\"';
-        size_t i=0;
-        for (auto m : marks) {
-          stream << m.position.get() << ':';
-          stream << '{'
-                 << m.color.x << ',' << m.color.y << ',' << m.color.z << ',' << m.color.w
-                 << '}';
-          if (i < marks.size()-1) stream << ';';
-          i++;
-        }
-        stream << '\"';
-        return stream.str();
-      };
-      #ifndef HEADLESS
-      auto cmMarks = colormapWidget.gradient().get_marks();
-      auto rmMarks = radiusmapWidget.gradient().get_marks();
-      auto dmMarks = densitymapWidget.gradient().get_marks();
-      #endif
-
-      std::cout << "\n\n\n\nPut this in $PWD/viewer.ini:\n";
-      std::cout << "[RayGenData]\n";
-      std::cout << "rbfRadius=" << raygenData.rbfRadius << '\n';
-      std::cout << "clampMaxCumulativeValue=" << raygenData.clampMaxCumulativeValue << '\n';
-      std::cout << "sigma=" << raygenData.sigma << '\n';
-      std::cout << "power=" << raygenData.power << '\n';
-      std::cout << "particlesPerLeaf=" << raygenData.particlesPerLeaf << '\n';
-      std::cout << "ddaDimensions=" << raygenData.ddaDimensions << '\n';
-      std::cout << "visualizeAttributes=" << raygenData.visualizeAttributes << '\n';
-      std::cout << "useDDA=" << raygenData.useDDA << '\n';
-      std::cout << "showHeatmap=" << raygenData.showHeatmap << '\n';
-      std::cout << "disableColorCorrection=" << raygenData.disableColorCorrection << '\n';
-      std::cout << "light.azimuth=" << raygenData.light.azimuth << '\n';
-      std::cout << "light.elevation=" << raygenData.light.elevation << '\n';
-      std::cout << "light.ambient=" << raygenData.light.ambient << '\n';
-      std::cout << "camera.pos=" << raygenData.camera.pos << '\n';
-      std::cout << "camera.dir_00=" << raygenData.camera.dir_00 << '\n';
-      std::cout << "camera.dir_du=" << raygenData.camera.dir_du << '\n';
-      std::cout << "camera.dir_dv=" << raygenData.camera.dir_dv << '\n';
-      std::cout << "spp=" << raygenData.spp << '\n';
-      std::cout << "exposure=" << raygenData.exposure << '\n';
-      std::cout << "gamma=" << raygenData.gamma << '\n';
-      std::cout << "\n[MissProgData]\n";
-      std::cout << "color0=" << missData->color0 << '\n';
-      std::cout << "color1=" << missData->color1 << '\n';
-      std::cout << "\n[Misc.]\n";
-      std::cout << "particleFrame=" << particleFrame << '\n';
-      std::cout << "mode=" << mode << '\n';
-      std::cout << "colormap=" << marksToString(cmMarks) << '\n';
-      std::cout << "radiusmap=" << marksToString(rmMarks) << '\n';
-      std::cout << "densitymap=" << marksToString(dmMarks) << '\n';
-      std::cout << std::flush;
-    }
-
     bool forceRebuild = false;;
 
     double accelBuildTime = 0.0;
@@ -1115,7 +1049,7 @@ int main(int argc, char *argv[])
     }
 
     double accelUpdateTime = 0.0;
-    if (previousParticleRadius != rbfRadius || radiusEdited || forceRebuild) {
+    if (previousParticleRadius != rbfRadius || radiusEdited || densityEdited || forceRebuild) {
       particleRecord.rbfRadius = rbfRadius;
       raygenData.rbfRadius = rbfRadius;
       gprtComputeSetParameters(GenRBFBounds, &particleRecord);
