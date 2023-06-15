@@ -8,44 +8,14 @@ add_subdirectory(3rdParty/GPRT)
 add_subdirectory(3rdParty/imgui_gradient)
 target_include_directories(imgui_gradient PUBLIC 3rdParty/GPRT/3rdParty/)
 
-option(BUILD_ARBORX "Build ArborX Library for DBScan Dataset" ON)
-if (${BUILD_ARBORX})
-add_subdirectory(3rdParty/ArborX)
-endif()
-
-option(BUILD_MMPLD "Build MMPLD Library for University of Stuttgart Data" ON)
-if (${BUILD_MMPLD})
-add_library(mmpld INTERFACE)
-target_include_directories(mmpld INTERFACE ${CMAKE_CURRENT_LIST_DIR}/3rdParty/mmpld_io/include/)
-endif()
-
-option(BUILD_GENERICIO "Build GENERICIO Library for HACC" ON)
-if (${BUILD_GENERICIO})
-add_subdirectory(3rdParty/genericio)
-endif()
-
-option(USE_VTK "Use VTK to load the FPM data from Sci-Vis Contest 2016" ON)
-if (USE_VTK)
-find_package(VTK COMPONENTS
-  vtkCommonColor
-  vtkCommonCore
-  vtkIOXML
-  vtkInteractionStyle
-  vtkRenderingCore
-  vtkCommonDataModel
-  vtkIOLegacy
-  vtkRenderingFreeType
-  vtkRenderingOpenGL2 QUIET)
-include(${VTK_USE_FILE})
-else()
-message(WARNING "VTK not found!")
-endif()
-
 embed_devicecode(
   OUTPUT_TARGET
     deviceCodeCommon
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeCommon.hlsl
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rng.h
 )
 
 embed_devicecode(
@@ -53,6 +23,9 @@ embed_devicecode(
     deviceCodeSplat
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeSplat.hlsl
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rng.h
 )
 
 embed_devicecode(
@@ -60,6 +33,9 @@ embed_devicecode(
     deviceCodeRBF
   SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeRBF.hlsl
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/rng.h
 )
 
 embed_devicecode(
@@ -84,46 +60,18 @@ set(COMPILE_DEFINITIONS)
 set(SOURCES
   hostCode.cpp
   IniFile.cpp
-  importers/import_vtk.cpp
 )
 add_executable(viewer)
 target_sources(viewer PRIVATE ${SOURCES})
-add_executable(viewer-headless)
-target_sources(viewer-headless PRIVATE ${SOURCES})
-
-if (${BUILD_ARBORX})
-set(LIBRARIES ${LIBRARIES} ArborX::ArborX)
-set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DARBORX)
-endif()
-
-if (${BUILD_MMPLD})
-set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DMMPLD)
-set(LIBRARIES ${LIBRARIES} mmpld)
-endif()
-
-if (${BUILD_GENERICIO})
-set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DGENERICIO)
-set(LIBRARIES ${LIBRARIES} genericio)
-endif()
-
-if (USE_VTK)
-set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DVTK)
-set(LIBRARIES ${LIBRARIES} ${VTK_LIBRARIES})
-endif()
 
 set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DSTBN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/stbn/")
-find_package(TBB)
 
+find_package(TBB)
 if (${TBB_FOUND})
 set(LIBRARIES ${LIBRARIES} TBB::tbb)
 else(${TBB_FOUND})
-message(WARN "Could NOT find TBB")
+message(WARN " Could NOT find TBB")
 endif()
 
 target_link_libraries(viewer PUBLIC ${LIBRARIES})
 target_compile_definitions(viewer PUBLIC ${COMPILE_DEFINITIONS})
-
-target_link_libraries(viewer-headless PUBLIC ${LIBRARIES})
-target_compile_definitions(viewer-headless PUBLIC ${COMPILE_DEFINITIONS})
-target_compile_definitions(viewer-headless PUBLIC -DHEADLESS)
-target_include_directories(viewer-headless PUBLIC 3rdParty/imgui_gradient/src/) # for embedded color maps

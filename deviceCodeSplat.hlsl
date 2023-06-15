@@ -148,7 +148,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
   // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f);//(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);//(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
   // float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);//(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
 
   result_color = over(result_color, backgroundColor);

@@ -161,7 +161,7 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
   }
 
   // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  float4 backgroundColor = float4(0.f, 0.f, 0.f, 0.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
 
   color = over(color, backgroundColor);
 

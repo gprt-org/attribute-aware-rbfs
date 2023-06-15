@@ -45,10 +45,6 @@
 #include <fstream>
 
 #include "importers/import_points.h"
-#include "importers/import_arborx.h"
-#include "importers/import_mmpld.h"
-#include "importers/import_vtk.h"
-#include "importers/import_cosmo.h"
 #include "IniFile.h"
 #include <argparse/argparse.hpp>
 
@@ -90,7 +86,7 @@ uint32_t particlesPerLeaf = 1;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
-uint32_t structuredGridResolution = 32;
+uint32_t structuredGridResolution = 256;
 uint32_t ddaGridResolution = 1;
 
 static std::vector<std::string> string_split(std::string s, char delim) {
@@ -105,7 +101,7 @@ static std::vector<std::string> string_split(std::string s, char delim) {
 }
 
 // Prints to the provided buffer a nice number of bytes (KB, MB, GB, etc)
-void pretty_bytes(uint bytes)
+void pretty_bytes(uint32_t bytes)
 {
     const char* suffixes[7];
     suffixes[0] = "B";
@@ -115,7 +111,7 @@ void pretty_bytes(uint bytes)
     suffixes[4] = "TB";
     suffixes[5] = "PB";
     suffixes[6] = "EB";
-    uint s = 0; // which suffix to use
+    uint32_t s = 0; // which suffix to use
     double count = bytes;
     while (count >= 1024 && s < 7)
     {
@@ -133,22 +129,10 @@ int main(int argc, char *argv[])
 {
   argparse::ArgumentParser program("RT Point Clouds");
 
-  program.add_argument("--dbscan")
-      .help("A path to a DBScan dataset (ending in .arborx)")
-      .default_value("");
-  program.add_argument("--mmpld")
-      .help("A path to a MMPLD dataset (ending in .mmpld)")
-      .default_value("");
-  program.add_argument("--vtk")
-      .help("A path to a folder containing .vtu files")
-      .default_value("");
   program.add_argument("--points")
       .help("A path to our custom points dataset (ending in .points)")
       .default_value("");
-  program.add_argument("--cosmo")
-      .help("A path to a directory containing .cosmo.* files")
-      .default_value("");
-
+  
   program.add_argument("--camera")
     .nargs(10)
     .help("posx, posy, posz, atx, aty, atz, upx, upy, upz, fovy")
@@ -165,35 +149,6 @@ int main(int argc, char *argv[])
     .default_value(0U)
     .scan<'u', uint32_t>();
  
-  #ifdef HEADLESS
-  program.add_argument("--orbit")
-    .help("Number of spherical orbits for benchmark")
-    .default_value(0)
-    .scan<'i', int>();
-
-  program.add_argument("--orbit-center")
-    .nargs(3)
-    .help("Orbit center vector (cx, cy, cz)")
-    .default_value(std::vector{{1e20f,1e20f,1e20f}})
-    .scan<'g', float>();
-
-  program.add_argument("--orbit-up")
-    .nargs(3)
-    .help("Orbit up vector (upx, upy, upz)")
-    .default_value(std::vector{{0.f,1.f,0.f}})
-    .scan<'g', float>();
-
-  program.add_argument("--orbit-radius")
-    .help("Orbit radius")
-    .default_value(-1.f)
-    .scan<'g', float>();
-
-  program.add_argument("--benchmark")
-    .help("Run in benchmark mode")
-    .default_value(false)
-    .implicit_value(true);
-  #endif
-
   try {
     program.parse_args(argc, argv);
   }
@@ -210,83 +165,36 @@ int main(int argc, char *argv[])
 
   std::vector<std::vector<std::pair<uint64_t, float4>>> particleData;
 
-  std::string dbscanPath = program.get<std::string>("--dbscan");
-  std::string mmpldPath = program.get<std::string>("--mmpld");
   std::string pointsPath = program.get<std::string>("--points");
-  std::string cosmoDir = program.get<std::string>("--cosmo");
-  std::string vtkPath = program.get<std::string>("--vtk");
   bool synthetic = false;
-  if (dbscanPath != "") {
-    std::cout<< "loading " <<dbscanPath<<std::endl;
-    importArborX(dbscanPath, particleData);
-  }
-  else if (mmpldPath != "") {
-    std::cout<< "loading " <<mmpldPath<<std::endl;
-    importMMPLD(mmpldPath, particleData);
-  }
-  else if (pointsPath != "") {
+  if (pointsPath != "") {
     std::cout<< "loading " <<pointsPath<<std::endl;
     importPoints(pointsPath, particleData);
-  }
-  else if (vtkPath != "") {
-    std::cout<< "loading " <<vtkPath<<std::endl;
-    importVTK(vtkPath, particleData);
-  }
-  else if (cosmoDir != "") {
-    std::cout<< "loading " <<cosmoDir<<std::endl;
-    importCosmo(cosmoDir, particleData);
   }
   else
   {
     synthetic = true;
     ddaGridResolution = 1;
-    particleData.resize(180);
-    // for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
-    //   particleData[frame].resize(2);
-    //   for (uint32_t i = 0; i < particleData[frame].size(); ++i)
-    //   {
-    //     float t1 = float(i) / float(particleData[frame].size());
-        
-    //     float t2 = 2.f * ( float(frame) / float(particleData.size()) );
-
-    //     particleData[frame][i].second = float4(
-    //       (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
-    //       (cos(t2 * 3.14) * .5 + .5) * cos(t1 * 2.f * 3.14f),
-    //       0.f, t1);
-    //   }
-    // }
-
-
-    float gr = 1.61803398875;
+    particleData.resize(1000);
     for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
       float r = 1;
-      particleData[frame].resize(20*20*20);
-      for (int z = 0; z < 20; ++z) {
-      for (int y = 0; y < 20; ++y) {
-      for (int x = 0; x < 20; ++x) {
-        uint32_t i = x + y * 20 + z * 20 * 20;
+      particleData[frame].resize(10*10*10);
+      for (int z = 0; z < 10; ++z) {
+      for (int y = 0; y < 10; ++y) {
+      for (int x = 0; x < 10; ++x) {
+        uint32_t i = x + y * 10 + z * 10 * 10;
         float t1 = float(i) / float(particleData[frame].size());
-        float t2 = 2.f * ( float(frame) / float(particleData.size()) );
+        float t2 = ( float(frame) / float(particleData.size()) );
 
         particleData[frame][i].second = float4(
-          t2 * ((x - 10.f) / 20.f),
-          t2 * ((y - 10.f) / 20.f),
-          t2 * ((z - 10.f) / 20.f),
+          (sin(t2 * 2.f * 3.14) + 1.0f) * ((x - 5.f) / 10.f),
+          (sin(t2 * 2.f * 3.14) + 1.0f) * ((y - 5.f) / 10.f),
+          (sin(t2 * 2.f * 3.14) + 1.0f) * ((z - 5.f) / 10.f),
         t1);
       }
       }
       }
-
-      // for (uint32_t i = 0; i < particleData[frame].size(); ++i)
-      // {
-
-          // (cos(t2 * 3.14) * .5 + .5) * sin(t1 * 2.f * 3.14f),
-          // (cos(t2 * 3.14) * .5 + .5) * cos(t1 * 2.f * 3.14f), 
-          
-      // }
-    }
-
-    
+    }    
   }
 
   size_t totalParticles = 0;
@@ -345,43 +253,11 @@ int main(int argc, char *argv[])
 
     if (synthetic) {
       lookAt = {0.f, 0.f, 0.f};
-      lookFrom = {0.f, 0.f, -1.f};
+      lookFrom = {2.f, 2.f, 2.f};
     }
   }
 
   bool camChanged = camParams.empty();
-
-  #ifdef HEADLESS
-  int orbitCount = program.get<int>("--orbit");
-  std::vector<float> vOrbitCenter = program.get<std::vector<float>>("--orbit-center");
-  std::vector<float> vOrbitUp = program.get<std::vector<float>>("--orbit-up");
-  float orbitRadius = program.get<float>("--orbit-radius");
-  float3 orbitCenter(vOrbitCenter[0], vOrbitCenter[1], vOrbitCenter[2]);
-  float3 orbitUp(vOrbitUp[0], vOrbitUp[1], vOrbitUp[2]);
-
-  std::vector<float3> orbitCameraPositions;
-  size_t currentOrbitPos = 0;
-
-  if (orbitCount != 0) {
-      if (orbitRadius <= 0.f) {
-          orbitRadius = length(aabb[1] - aabb[0]) / 2.f;
-      }
-      std::cout << "orbit radius: " << orbitRadius << "\n";
-      if (orbitCenter == float3(1e20f)) {
-          orbitCenter = (aabb[0] + aabb[1]) / 2.f;
-      }
-      std::cout << "orbit center: " << orbitCenter << "\n";
-      orbitCameraPositions = generate_fibonacci_sphere(orbitCount, orbitRadius);
-
-      std::cout << "starting pos " << orbitCenter + orbitCameraPositions[currentOrbitPos] << "\n";
-
-      lookFrom = lookAt + orbitCameraPositions[currentOrbitPos];
-      lookAt   = orbitCenter;
-      lookUp   = orbitUp;
-  }
-
-  bool benchmark = program.get<bool>("--benchmark");
-  #endif
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -406,7 +282,7 @@ int main(int argc, char *argv[])
   double beforeSort = getCurrentTime();
   for (size_t j = 0; j < particleData.size(); ++j)
   {
-    std::sort(std::execution::par_unseq, particleData[j].begin(), particleData[j].end());
+    std::sort(particleData[j].begin(), particleData[j].end());
   }
   double afterSort = getCurrentTime();
   double sortTime = afterSort-beforeSort;
@@ -665,8 +541,11 @@ int main(int argc, char *argv[])
   auto dmMarks=getMarks(dmMarksStr);
 
   if (cmMarks.empty()) {
-    cmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
-    cmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
+    cmMarks.push_back({0.f, {0.f, 0.f, 1.f, 1.f}});
+    cmMarks.push_back({0.25f, {0.f, 0.972549f, 1.f, 1.f}});
+    cmMarks.push_back({0.5f, {0.f, 1.f, 0.00784314f, 1.f}});
+    cmMarks.push_back({0.75f, {0.996078f, 1.f, 0.f, 1.f}});
+    cmMarks.push_back({1.f, {1.f, 0.f, 0.f, 1.f}});
   }
 
   if (rmMarks.empty()) {
@@ -675,24 +554,10 @@ int main(int argc, char *argv[])
   }
 
   if (dmMarks.empty()) {
-    dmMarks.push_back({0.f,{1.f,1.f,1.f,1.f}});
+    dmMarks.push_back({0.f,{0.f,0.f,0.f,0.f}});
     dmMarks.push_back({1.f,{1.f,1.f,1.f,1.f}});
   }
 
-  #ifdef HEADLESS
-  std::sort(cmMarks.begin(),cmMarks.end(),
-            [](const auto &a, const auto &b) { return a.first < b.first; });
-
-  std::sort(rmMarks.begin(),rmMarks.end(),
-            [](const auto &a, const auto &b) { return a.first < b.first; });
-
-  std::sort(dmMarks.begin(),dmMarks.end(),
-            [](const auto &a, const auto &b) { return a.first < b.first; });
-
-  ColorMap colormapInterpol{cmMarks};
-  ColorMap radiusmapInterpol{rmMarks};
-  ColorMap densitymapInterpol{dmMarks};
-  #else
   std::list<ImGG::Mark> cmMarksImGG, rmMarksImGG, dmMarksImGG;
   for (auto m : cmMarks)
     cmMarksImGG.push_back(ImGG::Mark(ImGG::RelativePosition(m.first),
@@ -712,7 +577,6 @@ int main(int argc, char *argv[])
 
   ImGG::Settings grayscaleWidgetSettings{};
   grayscaleWidgetSettings.flags = ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
-  #endif 
 
   bool majorantsOutOfDate = true;
   bool voxelized = false;
@@ -728,27 +592,19 @@ int main(int argc, char *argv[])
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.001f * diagonal;
+  float previousParticleRadius = 0.1f * diagonal;
   float radiusArg = program.get<float>("--radius");
-  bool renderAnimation = false;
-  int samplesPerAnimationFrame = 64;
-  bool playAnimation = false;
+  bool playAnimation = true;
   static bool disableBlueNoise = false;
   std::stringstream frameStats;
   do
   {
-    #ifndef HEADLESS
     ImGuiIO &io = ImGui::GetIO();
-    ImGui::NewFrame();
-    #endif
-    
+    ImGui::NewFrame(); 
 
     static int particleFrame = 0;
     ini.get_int32("particleFrame", particleFrame);
 
-    #ifdef HEADLESS
-    //
-    #else
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
     if (ImGui::Button("Play Animation")) {
@@ -764,57 +620,20 @@ int main(int argc, char *argv[])
       accumID = 1;
     }
 
-    ImGui::InputInt("samplesPerAnimationFrame", &samplesPerAnimationFrame);
-
-    if (ImGui::Button("Render Animation")) {
-      renderAnimation = true;
-      particleFrame = 0;
-      accumID = 1;
-    }
-
-    if (renderAnimation) {
-      std::string text = "Rendering frame " + std::to_string(particleFrame) + ", ";
-      text += std::to_string(accumID) + " / " + std::to_string(samplesPerAnimationFrame); 
-      ImGui::Text(text.c_str());
-
-
-      if (accumID == (samplesPerAnimationFrame + 1)) {
-        std::string numberStr = std::to_string(particleFrame);
-        auto new_str = std::string(3 - std::min(std::size_t(3), numberStr.length()), '0') + numberStr;
-        gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, std::string("./1image" + new_str + ".png").c_str());
-
-        particleFrame++;
-        accumID = 1;
-        if (particleFrame == particles.size()) {
-          renderAnimation = false;
-          particleFrame = 0;
-        }
-      }
-    }
-    #endif
-
-
-
     static float rbfRadius = previousParticleRadius;
     ini.get_float("rbfRadius", rbfRadius);
     // cmdline overrides ini!
     if (rbfRadius != previousParticleRadius && radiusArg > 0.f)
       rbfRadius = radiusArg;
 
-    #ifndef HEADLESS
     ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
-    #endif
 
     auto make_8bit = [](const float f) -> uint32_t
     {
       return std::min(255, std::max(0, int(f * 256.f)));
     };
    
-    #ifdef HEADLESS
-    if (firstFrame)
-    #else
     if (colormapWidget.widget("Attribute Colormap") || firstFrame)
-    #endif
     {
       gprtTextureMap(colormap);
       uint8_t *ptr = gprtTextureGetPointer(colormap);
@@ -840,24 +659,16 @@ int main(int argc, char *argv[])
     }
 
     bool radiusEdited = false;
-    #ifdef HEADLESS
-    if (firstFrame)
-    #else
     if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) || firstFrame)
-    #endif
     {
       radiusEdited = true;
       gprtTextureMap(radiusmap);
       uint8_t *ptr = gprtTextureGetPointer(radiusmap);
       for (uint32_t i = 0; i < 64; ++i)
       {
-        #ifdef HEADLESS
-        float4 result = radiusmapInterpol.at(i / 63.f);
-        #else
         auto result = radiusmapWidget.gradient().at(
             ImGG::RelativePosition(i / 63.f)
         );
-        #endif
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
@@ -867,11 +678,7 @@ int main(int argc, char *argv[])
       gprtTextureUnmap(radiusmap);
     }
 
-    #ifdef HEADLESS
-    if (firstFrame)
-    #else
     if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) || firstFrame)
-    #endif
     {
       gprtTextureMap(densitymap);
       uint8_t *ptr = gprtTextureGetPointer(densitymap);
@@ -895,7 +702,6 @@ int main(int argc, char *argv[])
 
     static bool disableColorCorrection = false;
     ini.get_bool("disableColorCorrection", disableColorCorrection);
-    #ifndef HEADLESS
     if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
       particleRecord->disableColorCorrection = disableColorCorrection;
       raygenData.disableColorCorrection = disableColorCorrection;
@@ -909,24 +715,15 @@ int main(int argc, char *argv[])
       accumID = 1;
     }
 
-    if (ImGui::Button("Save screenshot"))
-    {
-      gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, "./screenshot.png");
-    }
-    #endif
-    
-
     static float exposure = 1.f;
     static float gamma = 1.0f;
     static int spp = 1;
     ini.get_float("exposure", exposure);
     ini.get_float("gamma", gamma);
     ini.get_int32("spp", spp);
-    #ifndef HEADLESS
     ImGui::DragInt("Samples", &spp, 1, 1, 64);
     ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
     ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
-    #endif
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
     raygenData.spp = spp;
@@ -939,18 +736,12 @@ int main(int argc, char *argv[])
 
     static int mode = 1;
     ini.get_int32("mode", mode);
-    #ifdef HEADLESS
-    //
-    #else
-    if (ImGui::RadioButton("Splatting", &mode, 0))
+    if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
       accumID = 1;
-    if (ImGui::RadioButton("RBF Query", &mode, 1))
+    if (ImGui::RadioButton("Splatting (Knoll 2019)", &mode, 0))
       accumID = 1;
     if (ImGui::RadioButton("Voxelized", &mode, 2))
       accumID = 1;
-    #endif
-
-
 
     float speed = .001f;
     lastxpos = xpos;
@@ -1024,12 +815,8 @@ int main(int argc, char *argv[])
       if (left_shift) lookUp *= -1.f;
     }
 
-    #ifdef HEADLESS
-    if (fovChanged || firstFrame)
-    #else
     // If we click the mouse, we should rotate the camera
     if (state == GPRT_PRESS && !io.WantCaptureMouse || x_state || y_state || z_state || fovChanged || firstFrame)
-    #endif
     {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
@@ -1069,11 +856,7 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
-      if (camParams.empty()) {
-        #ifdef HEADLESS
-        if (orbitCount == 0) {
-        #endif
-
+      if (camParams.empty()) {        
         auto error_pos =
         ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
                                     raygenData.camera.pos.y,
@@ -1091,23 +874,11 @@ int main(int argc, char *argv[])
                                        raygenData.camera.dir_dv.y,
                                        raygenData.camera.dir_dv.z);
 
-        #ifdef HEADLESS
-        if (error_pos    == IniFile::Ok &&
-            error_dir00  == IniFile::Ok &&
-            error_dir_du == IniFile::Ok &&
-            error_dir_dv == IniFile::Ok)
-          camChanged = false; // don't recompute!
-        #endif
-
-        #ifdef HEADLESS
-        }
-        #endif
       }
 
       accumID = 1;
     }
 
-    #ifndef HEADLESS
     if (rstate == GPRT_PRESS && !io.WantCaptureMouse)
     {
       float3 view_vec = lookFrom - lookAt;
@@ -1131,13 +902,8 @@ int main(int argc, char *argv[])
 
       accumID = 1;
     }
-    #endif
 
-    #ifndef HEADLESS
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse)
-    #else
-    if (camChanged)
-    #endif
     {
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
@@ -1164,11 +930,6 @@ int main(int argc, char *argv[])
       raygenData.camera.dir_00 = camera_d00;
       raygenData.camera.dir_du = camera_ddu;
       raygenData.camera.dir_dv = camera_ddv;
-     
-      #if HEADLESS
-      camChanged = false;
-      #endif
-
       accumID = 1;
     }
 
@@ -1180,7 +941,6 @@ int main(int argc, char *argv[])
     ini.get_float("clampMaxCumulativeValue", clampMaxCumulativeValue);
     ini.get_float("unit", unit);
     ini.get_float("jitter", jitter);
-    #ifndef HEADLESS
     if (ImGui::DragFloat("clamp max cumulative value",
                            &clampMaxCumulativeValue, 1.f, 0.f, 5000.f))
     {
@@ -1199,18 +959,15 @@ int main(int argc, char *argv[])
       accumID = 1;
     if (ImGui::InputFloat("jitter", &jitter, 0.0f, 0.0f, "%.4f"))
       accumID = 1;
-    #endif
 
     static bool visualizeAttributes = true;
     ini.get_bool("visualizeAttributes", visualizeAttributes);
-    #ifndef HEADLESS
     if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes))
     {
       accumID = 1;
       // majorantsOutOfDate = true; // might do this later...
       voxelized = false;
     }
-    #endif
 
     unit = std::max(unit, .0001f);
     static float azimuth = 0.f;
@@ -1220,9 +977,6 @@ int main(int argc, char *argv[])
     ini.get_float("light.elevation", elevation);
     ini.get_float("light.ambient", ambient);
 
-    #ifdef HEADLESS
-    //
-    #else
     if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
       accumID = 1;
     if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
@@ -1230,8 +984,7 @@ int main(int argc, char *argv[])
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
       accumID = 1;
     ImGui::EndFrame();
-    #endif
-
+    
     static bool useDDA = true;
     ini.get_bool("useDDA", useDDA);
 
@@ -1305,11 +1058,9 @@ int main(int argc, char *argv[])
       std::cout << "\n[Misc.]\n";
       std::cout << "particleFrame=" << particleFrame << '\n';
       std::cout << "mode=" << mode << '\n';
-      #ifndef HEADLESS
       std::cout << "colormap=" << marksToString(cmMarks) << '\n';
       std::cout << "radiusmap=" << marksToString(rmMarks) << '\n';
       std::cout << "densitymap=" << marksToString(dmMarks) << '\n';
-      #endif
       std::cout << std::flush;
     }
 
@@ -1443,11 +1194,9 @@ int main(int argc, char *argv[])
       // majorantsOutOfDate = false;
     }
 
-    #ifndef HEADLESS
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
-    #endif
 
     raygenData.accumID = accumID;
     raygenData.frameID = frameID;
@@ -1480,49 +1229,8 @@ int main(int argc, char *argv[])
     char title[1000];
     sprintf(title,"%.2f FPS",(1.0/tavg));
 
-    #ifdef HEADLESS
-    char fileName[1000];
-    if (orbitCount > 0)
-      sprintf(fileName,"./screenshot-r%f-ppl%u-orbit%i.png",rbfRadius,particlesPerLeaf,(int)(currentOrbitPos+1));
-    else
-      sprintf(fileName,"./screenshot-r%f.png",rbfRadius);
-    printf("%s\r\n", title);
-    fflush(stdout);
-    // gprtBufferSaveImage(imageBuffer, fbSize.x, fbSize.y, fileName);
-    #else
     gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
-    #endif
-
-    #ifdef HEADLESS
-    if (orbitCount > 0) {
-      ++currentOrbitPos;
-      float3 nextPos = orbitCenter + orbitCameraPositions[currentOrbitPos];
-      nextPos.z = std::abs(nextPos.z);
-      std::cout << "Advance to orbit #" << currentOrbitPos << "\nOrbit pos " << nextPos << "\n";
-
-      lookFrom = nextPos;
-      lookAt   = orbitCenter;
-      lookUp   = orbitUp;
-      camChanged = true;
-    }
-
-    if (benchmark) {
-      static int firstFrame = true;
-      if (firstFrame) {
-        frameStats << "\"orbitID\"; \"RBF radius\"; \"Particles per leaf\"; ";
-        frameStats << "\"frame time (sec.)\"; \"hilbert time (sec.)\"; \"sort time (sec.)\"; \"value range time (sec.)\"; \"accel build time (sec.)\"; \"accel update time (sec.)\"; ";
-        frameStats << "\"camera string\"\n";
-        firstFrame = false;
-      }
-      frameStats << currentOrbitPos << ';' << rbfRadius << ';' << particlesPerLeaf << ';';
-      frameStats << profile << ';' << hilbertTime << ';' << sortTime << ';' << valueRangeTime << ';' << accelBuildTime << ';' << accelUpdateTime << ';';
-      frameStats << "\"--camera " << lookFrom.x << ' ' << lookFrom.y << ' ' << lookFrom.z << ' '
-                                  << lookAt.x << ' ' << lookAt.y << ' ' << lookAt.z << ' '
-                                  << lookUp.x << ' ' << lookUp.y << ' ' << lookUp.z << ' '
-                                  << cosFovy << "\"\n";
-    }
-    #endif
 
     accumID ++;;
     frameID ++;;
@@ -1531,29 +1239,7 @@ int main(int argc, char *argv[])
     // during the next loop iteration!
     ini.clear();
   }
-  #ifdef HEADLESS
-  while (currentOrbitPos < orbitCount);
-  #else
   while (!gprtWindowShouldClose(context));
-  #endif
-
-  #ifdef HEADLESS
-  if (benchmark) {
-    std::cout << "\n\n\n" << frameStats.str();
-    std::cout << std::flush;
-    char fileName[1000];
-    if (radiusArg > 0.f)
-      sprintf(fileName,"./benchmark-r%f-ppl%u.txt",radiusArg,particlesPerLeaf);
-    else
-      sprintf(fileName,"./benchmark-ppl%u.txt",particlesPerLeaf);
-    std::ofstream out(fileName);
-    out << "cmdline:\n";
-    for (int i=0; i<argc; ++i)
-      out << argv[i] << ' ';
-    out << "\n\n";
-    out << frameStats.str();
-  }
-  #endif
 
   LOG("cleaning up ...");
 
