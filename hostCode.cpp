@@ -70,8 +70,8 @@ extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
-const int2 fbSize = {1024, 1024}; // teaser size
-// const int2 fbSize = {1920, 1080};
+// const int2 fbSize = {1024, 1024}; // benchmark size
+const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -282,7 +282,12 @@ int main(int argc, char *argv[])
   double beforeSort = getCurrentTime();
   for (size_t j = 0; j < particleData.size(); ++j)
   {
+    #ifdef _WIN32
+    // not sure why this isn't working on windows currently. 
     std::sort(particleData[j].begin(), particleData[j].end());
+    #else
+    std::sort(std::execution::par_unseq, particleData[j].begin(), particleData[j].end());
+    #endif
   }
   double afterSort = getCurrentTime();
   double sortTime = afterSort-beforeSort;
@@ -419,10 +424,6 @@ int main(int argc, char *argv[])
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
                         GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP);
 
-  RayGenData *splatRayGenData = gprtRayGenGetParameters(ParticleSplatRayGen);
-  RayGenData *rbfRayGenData = gprtRayGenGetParameters(ParticleRBFRayGen);
-  RayGenData *voxelRayGenData = gprtRayGenGetParameters(ParticleVoxelRayGen);
-
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
@@ -462,28 +463,29 @@ int main(int argc, char *argv[])
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
                         ((maxNumParticles + particlesPerLeaf - 1) / particlesPerLeaf) /* just one aabb */);
 
-  ParticleData *particleRecord = gprtGeomGetParameters(particleGeom);
-  // particleRecord->numParticles = particles[0].size();
-  particleRecord->particlesPerLeaf = particlesPerLeaf;
-  // particleRecord->rbfRadius = rbfRadius;
-  particleRecord->aabbs = gprtBufferGetHandle(aabbBuffer);
-  particleRecord->particles = gprtBufferGetHandle(particleBuffer);
-  particleRecord->colormap = gprtTextureGetHandle(colormap);
-  particleRecord->radiusmap = gprtTextureGetHandle(radiusmap);
-  particleRecord->colormapSampler = gprtSamplerGetHandle(sampler);
-  particleRecord->disableColorCorrection = false;
+  ParticleData particleRecord{};
+
+  // particleRecord.numParticles = particles[0].size();
+  particleRecord.particlesPerLeaf = particlesPerLeaf;
+  // particleRecord.rbfRadius = rbfRadius;
+  particleRecord.aabbs = gprtBufferGetHandle(aabbBuffer);
+  particleRecord.particles = gprtBufferGetHandle(particleBuffer);
+  particleRecord.colormap = gprtTextureGetHandle(colormap);
+  particleRecord.radiusmap = gprtTextureGetHandle(radiusmap);
+  particleRecord.colormapSampler = gprtSamplerGetHandle(sampler);
+  particleRecord.disableColorCorrection = false;
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
   // raygenData.numParticles = particles[0].size();
   raygenData.particlesPerLeaf = particlesPerLeaf;
 
-  // same parameters go to these compute programs too
-  ParticleData *genParticlesData = gprtComputeGetParameters(GenParticles);
-  ParticleData *genRBFBoundsData = gprtComputeGetParameters(GenRBFBounds);
-  *genParticlesData = *particleRecord;
-  *genRBFBoundsData = *particleRecord;
-  *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
+  gprtGeomSetParameters(particleGeom, &particleRecord);
+  gprtComputeSetParameters(GenParticles, &particleRecord);
+  gprtComputeSetParameters(GenRBFBounds, &particleRecord);
+  gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
+  gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
+  gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
 
   // Upload parameters
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
@@ -514,7 +516,9 @@ int main(int argc, char *argv[])
   raygenData.ddaDimensions = ddaDimensions;
 
   // copy raygen params
-  *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
+  gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
+  gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
+  gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
   gprtBuildShaderBindingTable(context);
 
   std::string cmMarksStr, rmMarksStr, dmMarksStr;
@@ -678,8 +682,10 @@ int main(int argc, char *argv[])
       gprtTextureUnmap(radiusmap);
     }
 
+    bool densityEdited = false;
     if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) || firstFrame)
     {
+      densityEdited = true;
       gprtTextureMap(densitymap);
       uint8_t *ptr = gprtTextureGetPointer(densitymap);
       for (uint32_t i = 0; i < 64; ++i)
@@ -703,7 +709,8 @@ int main(int argc, char *argv[])
     static bool disableColorCorrection = false;
     ini.get_bool("disableColorCorrection", disableColorCorrection);
     if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
-      particleRecord->disableColorCorrection = disableColorCorrection;
+      particleRecord.disableColorCorrection = disableColorCorrection;
+      gprtGeomSetParameters(particleGeom, &particleRecord);
       raygenData.disableColorCorrection = disableColorCorrection;
       voxelized = false;
       accumID = 1;
@@ -1002,9 +1009,9 @@ int main(int argc, char *argv[])
     raygenData.light.elevation = elevation;
     raygenData.light.azimuth = azimuth;
 
-    particleRecord->clampMaxCumulativeValue = clampMaxCumulativeValue;
-    particleRecord->sigma = sigma;
-    particleRecord->visualizeAttributes = visualizeAttributes;
+    particleRecord.clampMaxCumulativeValue = clampMaxCumulativeValue;
+    particleRecord.sigma = sigma;
+    particleRecord.visualizeAttributes = visualizeAttributes;
 
     // Shift-I prints an ini-file for the current program state
     if (i_state && shift)
@@ -1069,8 +1076,8 @@ int main(int argc, char *argv[])
     double accelBuildTime = 0.0;
     if (previousParticleFrame != particleFrame || forceRebuild) {    
       // std::cout<<"Num particles "<< particles[particleFrame].size();
-      particleRecord->numParticles = particles[particleFrame].size();
-      particleRecord->rbfRadius = previousParticleRadius;
+      particleRecord.numParticles = particles[particleFrame].size();
+      particleRecord.rbfRadius = previousParticleRadius;
       raygenData.numParticles = particles[particleFrame].size();
       raygenData.rbfRadius = previousParticleRadius;
 
@@ -1080,7 +1087,8 @@ int main(int argc, char *argv[])
       memcpy(particlePositions, particles[particleFrame].data(), sizeof(float4) * particles[particleFrame].size());
       gprtBufferUnmap(particleBuffer);
 
-      *genRBFBoundsData = *particleRecord;
+      gprtComputeSetParameters(GenRBFBounds, &particleRecord);
+      gprtGeomSetParameters(particleGeom, &particleRecord);
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
       // Generate bounding boxes for those particles
@@ -1093,29 +1101,12 @@ int main(int argc, char *argv[])
       size_t particleSize = gprtBufferGetSize(particleBuffer);
       size_t aabbSize = gprtBufferGetSize(aabbBuffer);
       size_t accelSize = gprtAccelGetSize(particleAccel);
-      std::cout<<"Particle Buffer Size "; pretty_bytes(particleSize); std::cout << std::endl;
-      std::cout<<"AABB Buffer Size " ; pretty_bytes(aabbSize); std::cout << std::endl;
-      std::cout<<"Accel Size " ; pretty_bytes(accelSize); std::cout << std::endl; 
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
       double afterAccelBuild = getCurrentTime();
       accelBuildTime = afterAccelBuild-beforeAccelBuild;
 
-      std::cout<<"accel build time "<< accelBuildTime * 1000 <<std::endl;
-
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
-
-      // compute minmax ranges
-      {
-        // auto params = gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds);
-        // *params = raygenData;
-        // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-        // uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-        // gprtBufferClear(minMaxVolume);
-        // gprtComputeLaunch1D(context, MinMaxRBFBounds, (particles[particleFrame].size() + (particlesPerLeaf - 1)) / particlesPerLeaf);
-        // std::cout << "- Done!" << std::endl;
-      }
       
       voxelized = false;
       majorantsOutOfDate = true;
@@ -1125,9 +1116,10 @@ int main(int argc, char *argv[])
 
     double accelUpdateTime = 0.0;
     if (previousParticleRadius != rbfRadius || radiusEdited || forceRebuild) {
-      particleRecord->rbfRadius = rbfRadius;
+      particleRecord.rbfRadius = rbfRadius;
       raygenData.rbfRadius = rbfRadius;
-      *genRBFBoundsData = *particleRecord;
+      gprtComputeSetParameters(GenRBFBounds, &particleRecord);
+      gprtGeomSetParameters(particleGeom, &particleRecord);
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
       // Regenerate bounding boxes for new radius
@@ -1182,18 +1174,6 @@ int main(int argc, char *argv[])
       voxelized = true;
     }
 
-    // if we need to, recompute majorants
-    if (majorantsOutOfDate)
-    {
-      // gprtBufferClear(majorantVolume);
-      // auto params = gprtComputeGetParameters<RayGenData>(ComputeMajorantGrid);
-      // *params = raygenData;
-      // gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-      // uint64_t numVoxels = ddaGridResolution * ddaGridResolution * ddaGridResolution;
-      // gprtComputeLaunch1D(context, ComputeMajorantGrid, numVoxels);
-      // majorantsOutOfDate = false;
-    }
-
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
@@ -1202,7 +1182,10 @@ int main(int argc, char *argv[])
     raygenData.frameID = frameID;
 
     // copy raygen params
-    *splatRayGenData = *rbfRayGenData = *voxelRayGenData = raygenData;
+    gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
+    gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
+    gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
+
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     gprtBeginProfile(context);
