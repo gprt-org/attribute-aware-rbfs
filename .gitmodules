@@ -4,15 +4,6 @@
 [submodule "3rdParty/imgui_gradient"]
 	path = 3rdParty/imgui_gradient
 	url = git@github.com:natevm/imgui_gradient.git
-[submodule "3rdParty/ArborX"]
-	path = 3rdParty/ArborX
-	url = git@github.com:arborx/ArborX.git
 [submodule "3rdParty/argparse"]
 	path = 3rdParty/argparse
 	url = git@github.com:p-ranav/argparse.git
-[submodule "3rdParty/mmpld_io"]
-	path = 3rdParty/mmpld_io
-	url = git@github.com:UniStuttgart-VISUS/mmpld_io.git
-[submodule "3rdParty/genericio"]
-	path = 3rdParty/genericio
-	url = https://git.cels.anl.gov/hacc/genericio.git
