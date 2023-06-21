@@ -268,8 +268,8 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
-  float3 rt = record.globalAABBMax + record.rbfRadius;
-  float3 lb = record.globalAABBMin - record.rbfRadius;
+  float3 rt = record.globalAABBMax + 2.f * record.rbfRadius;
+  float3 lb = record.globalAABBMin - 2.f * record.rbfRadius;
 
   float diagonal = length(rt - lb);
 

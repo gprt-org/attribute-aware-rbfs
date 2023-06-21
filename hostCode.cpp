@@ -48,13 +48,11 @@
 #include "importers/import_points.h"
 #include <argparse/argparse.hpp>
 
-
 // For parallel sorting of points along a hilbert curve
 #include "hilbert.h"
 #include "timer.h"
 #include <algorithm>
 #include <execution>
-
 
 #define LOG(message)                                                           \
   std::cout << GPRT_TERMINAL_BLUE;                                             \
@@ -73,7 +71,7 @@ extern GPRTProgram deviceCodeVoxel;
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
 // const int2 fbSize = {1024, 1024}; // benchmark size
-const int2 fbSize = {1920, 1080};
+const int2 fbSize = {1280, 720};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -170,7 +168,7 @@ int main(int argc, char *argv[]) {
   } else {
     synthetic = true;
     ddaGridResolution = 1;
-    particleData.resize(1000);
+    particleData.resize(500);
     for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
       float r = 1;
       particleData[frame].resize(10 * 10 * 10);
@@ -246,7 +244,7 @@ int main(int argc, char *argv[]) {
 
     if (synthetic) {
       lookAt = {0.f, 0.f, 0.f};
-      lookFrom = {2.f, 2.f, 2.f};
+      lookFrom = {-3.f, 3.f, 3.f};
     }
   }
 
@@ -614,7 +612,7 @@ int main(int argc, char *argv[]) {
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.1f * diagonal;
+  float previousParticleRadius = 0.05f * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool playAnimation = true;
   static bool disableBlueNoise = false;
