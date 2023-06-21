@@ -87,7 +87,6 @@ std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
 uint32_t structuredGridResolution = 256;
-uint32_t ddaGridResolution = 1;
 
 static std::vector<std::string> string_split(std::string s, char delim) {
   std::vector<std::string> result;
@@ -167,7 +166,6 @@ int main(int argc, char *argv[]) {
     importPoints(pointsPath, particleData);
   } else {
     synthetic = true;
-    ddaGridResolution = 1;
     particleData.resize(500);
     for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
       float r = 1;
@@ -327,20 +325,12 @@ int main(int argc, char *argv[]) {
   GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
   GPRTModule moduleVoxel = gprtModuleCreate(context, deviceCodeVoxel);
 
-  auto GenParticles =
-      gprtComputeCreate<ParticleData>(context, moduleCommon, "GenParticles");
   auto GenRBFBounds =
       gprtComputeCreate<ParticleData>(context, moduleCommon, "GenRBFBounds");
   auto AccumulateRBFBounds = gprtComputeCreate<RayGenData>(
       context, moduleCommon, "AccumulateRBFBounds");
   auto AverageRBFBounds =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "AverageRBFBounds");
-  auto MinMaxRBFBounds =
-      gprtComputeCreate<RayGenData>(context, moduleCommon, "MinMaxRBFBounds");
-  auto ClearMinMaxGrid =
-      gprtComputeCreate<RayGenData>(context, moduleCommon, "ClearMinMaxGrid");
-  auto ComputeMajorantGrid = gprtComputeCreate<RayGenData>(
-      context, moduleCommon, "ComputeMajorantGrid");
 
   auto particleType = gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
   gprtGeomTypeSetIntersectionProg(particleType, 1, moduleSplat,
@@ -482,7 +472,6 @@ int main(int argc, char *argv[]) {
   raygenData.particlesPerLeaf = particlesPerLeaf;
 
   gprtGeomSetParameters(particleGeom, &particleRecord);
-  gprtComputeSetParameters(GenParticles, &particleRecord);
   gprtComputeSetParameters(GenRBFBounds, &particleRecord);
   gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
   gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
@@ -509,23 +498,6 @@ int main(int argc, char *argv[]) {
   raygenData.volume = gprtBufferGetHandle(voxelVolume);
   raygenData.volumeCount = gprtBufferGetHandle(voxelVolumeCount);
   raygenData.volumeDimensions = dims;
-
-  // Grid of voxels for DDA
-  // minmax volume stores both min and max of RBF as well as min and max of
-  // attributes
-  auto minMaxVolume = gprtDeviceBufferCreate<float4>(
-      context, ddaGridResolution * ddaGridResolution * ddaGridResolution,
-      nullptr);
-  auto majorantVolume = gprtDeviceBufferCreate<float>(
-      context, ddaGridResolution * ddaGridResolution * ddaGridResolution,
-      nullptr);
-  raygenData.minMaxVolume = gprtBufferGetHandle(minMaxVolume);
-  raygenData.majorants = gprtBufferGetHandle(majorantVolume);
-  uint3 ddaDimensions =
-      uint3(ddaGridResolution, ddaGridResolution, ddaGridResolution);
-  ini.get_vec3ui("ddaDimensions", ddaDimensions.x, ddaDimensions.y,
-                 ddaDimensions.z);
-  raygenData.ddaDimensions = ddaDimensions;
 
   // copy raygen params
   gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
@@ -981,9 +953,6 @@ int main(int argc, char *argv[]) {
       accumID = 1;
     ImGui::EndFrame();
 
-    static bool useDDA = true;
-    ini.get_bool("useDDA", useDDA);
-
     static bool showHeatmap = false;
     ini.get_bool("showHeatmap", showHeatmap);
 
@@ -992,7 +961,6 @@ int main(int argc, char *argv[]) {
     raygenData.unit = unit;
     raygenData.jitter = jitter;
     raygenData.visualizeAttributes = visualizeAttributes;
-    raygenData.useDDA = useDDA;
     raygenData.showHeatmap = showHeatmap;
     raygenData.light.ambient = ambient;
     raygenData.light.elevation = elevation;
@@ -1075,23 +1043,6 @@ int main(int argc, char *argv[]) {
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
-
-      // compute minmax ranges
-      {
-        // std::cout << "Computing minmax ranges" << std::endl;
-        // // auto params1 =
-        // gprtComputeGetParameters<RayGenData>(ClearMinMaxGrid); auto params =
-        // gprtComputeGetParameters<RayGenData>(MinMaxRBFBounds); *params =
-        // raygenData; gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-        // uint64_t numVoxels = ddaGridResolution * ddaGridResolution *
-        // ddaGridResolution;
-        // // gprtComputeLaunch1D(context, ClearMinMaxGrid, numVoxels);
-        // gprtBufferClear(minMaxVolume);
-        // gprtComputeLaunch1D(context, MinMaxRBFBounds,
-        // (particles[particleFrame].size() + (particlesPerLeaf - 1)) /
-        // particlesPerLeaf); std::cout << "- Done!" << std::endl;
-      }
 
       voxelized = false;
       majorantsOutOfDate = true;

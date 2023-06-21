@@ -23,7 +23,6 @@
 #include "sharedCode.h"
 
 #include "rng.h"
-#include "dda.hlsli"
 
 struct RBFAttribute {
   float density;
@@ -37,8 +36,6 @@ struct [raypayload] RBFPayload {
 };
 
 class ParticleTracker {
-  
-  uint3 dimensions;
   int i;
   float random;
   LCGRand rng; // for tracking
@@ -54,7 +51,6 @@ class ParticleTracker {
   bool visualizeAttributes;
   bool disableColorCorrection;
 
-  gprt::Buffer majorants;
   gprt::Texture cmap;
   gprt::Texture dmap;
   gprt::Sampler cmapSampler; 
@@ -69,49 +65,34 @@ class ParticleTracker {
   bool doMarching;
 
 
-  bool lambda(RayDesc ray, int3 cell, float t0, float t1) {    
+  void track(RayDesc ray) {    
     if (doMarching) {
-      return stochasticMarching(ray, cell, t0, t1);
+      stochasticMarching(ray);
     }
     else {
-      return stochasticTracking(ray, cell, t0, t1);
+      stochasticTracking(ray);
     }
   }
   
-  bool stochasticMarching(RayDesc ray, int3 cell, float t0, float t1) {    
-    // float majorant = gprt::load<float>(
-    //   majorants,
-    //   cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
-    // );
-
-    // skip to the next cell
-    // if (majorant <= 0.f) {
-    //   t = t1;
-    //   return true; 
-    // }
-
+  void stochasticMarching(RayDesc ray) {    
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
     Texture1D densitymap = gprt::getTexture1DHandle(dmap);
-    float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
-    float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
 
     float RHS = -log(1.f - random * .99);
 
     // float 
-    // t = t0; // + jitter * unit;
     for (; i < MAX_DEPTH; ++i) {
-
       t = t + unit; 
 
       // A boundary has been hit
-      if (t >= t1) {
-        return true; // skip to next cell
+      if (t >= ray.TMax) {
+        return;
       }
 
       // Update current position
-      float3 x = org + t * dir;
+      float3 x = ray.Origin + t * ray.Direction;
 
       // Sample heterogeneous media
       RayDesc pointDesc;
@@ -133,13 +114,11 @@ class ParticleTracker {
               payload                  // the payload IO
       );
 
-
       if (payload.count > 0 && payload.density > 0.f) {
         payload.color /= payload.density;
         if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
       }
       else {
-        // t = t + unit; 
         continue;
       }
       
@@ -147,66 +126,49 @@ class ParticleTracker {
 
       float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
-      // allows colormap to hide attributes independent of RBF density
-      // if (visualizeAttributes) density *= pow(payload.color.w, 3);
       if (!visualizeAttributes) {
         float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
         payload.color.rgb = densityxf.rgb;
-        // density = pow(densityxf.w, 3);
       }
 
       LHS += density;
 
       if (LHS > RHS && !shadowRay) {
         albedo = float4(payload.color.rgb, 1.f);
-        return false; // terminate traversal
+        return;
       }
 
       if (shadowRay) {
         albedo.w += 1.f - exp(-density);
         if (albedo.w >= 1.f) {
           albedo.w = 1.f;
-          return false;
+          return;
         }
       }
-
     }
-
-    // stop traversal if we hit our sampling limit (avoids lockup)
-    return false;
   };
 
-  bool stochasticTracking(RayDesc ray, int3 cell, float t0, float t1) {    
-    // float majorant = gprt::load<float>(
-    //   majorants,
-    //   cell.x + cell.y * dimensions.x + cell.z * dimensions.x * dimensions.y
-    // );
-
-    // // skip to the next cell
-    // if (majorant <= 0.f) return true; 
-
+  void stochasticTracking(RayDesc ray) {
     float majorant = 1.f;
 
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
     Texture1D densitymap = gprt::getTexture1DHandle(dmap);
-    float3 org = gridPosToWorld(ray.Origin, lb, rt, dimensions);
-    float3 dir = gridDirToWorld(ray.Direction, lb, rt, dimensions);
 
     // float 
-    t = t0;
+    t = ray.TMin;
     for (; i < MAX_DEPTH; ++i) {
       // Sample a distance
       t = t - (log(1.0f - lcg_randomf(rng)) / majorant) * unit;
 
       // A boundary has been hit
-      if (t >= t1) {
-        return true; // skip to next cell
+      if (t >= ray.TMax) {
+        return;
       }
 
       // Update current position
-      float3 x = org + t * dir;
+      float3 x = ray.Origin + t * ray.Direction;
 
       // Sample heterogeneous media
       RayDesc pointDesc;
@@ -247,12 +209,9 @@ class ParticleTracker {
 
       if (lcg_randomf(rng) < density / (majorant)) {
         albedo = float4(payload.color.rgb, 1.f);
-        return false; // terminate traversal
+        return;
       }
     }
-
-    // stop traversal if we hit our sampling limit (avoids lockup)
-    return false;
   };
 };
 
@@ -291,12 +250,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
   float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
-  
-  
-
   ParticleTracker tracker;
-
-
   
   float3 random;
   float4 sppColor = float4(0.f, 0.f, 0.f, 0.f);
@@ -318,8 +272,6 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
 
     tracker.disableColorCorrection = record.disableColorCorrection;
-    tracker.majorants = record.majorants;
-    tracker.dimensions = record.ddaDimensions;
     tracker.i = 0;
     tracker.LHS = 0;
     tracker.random = random.x;  
@@ -343,26 +295,14 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         dbg = true;
         tracker.dbg = true;
       }
+      rayDesc.TMax = texit;
+      tracker.t = tenter + record.unit * random.y * record.jitter;
+      tracker.track(rayDesc);
 
-      // if (dbg) {
-      //   printf("OUTSIDE t0 %f t1 %f\n", tenter, texit);
-      // }
-
-      // compute origin and dir in voxel space
-      RayDesc ddaRay;
-      ddaRay.Origin = worldPosToGrid(rayDesc.Origin, lb, rt, tracker.dimensions);
-      ddaRay.Direction = worldDirToGrid(rayDesc.Direction, lb, rt, tracker.dimensions);
-      ddaRay.TMin = 0.f;
-      ddaRay.TMax = texit;
-      tracker.t = tenter + record.unit * random.y * record.jitter; // + lcg_randomf(rng) * record.rbfRadius;
-      dda3(ddaRay, tracker.dimensions, false, tracker);
-
-      // tracker.dda3(org, dir, texit, tracker.dimensions, false, colormap, colormapSampler, world);
-      // tracker.dda3(org, dir, texit, tracker.dimensions, false);
       float4 albedo = tracker.albedo;
       float t = tracker.t;
       float unit = record.unit;
-      float majorantExtinction = 1.f; // todo, DDA or something similar
+      float majorantExtinction = 1.f;
 
       // NEE shadow ray
       //   if we hit something and want to cast a shadow
@@ -375,34 +315,19 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         shadowRay.TMin = 0.f; 
         shadowRay.TMax = 10000.f;
         aabbIntersection(shadowRay, lb, rt, shadowTEnter, shadowTExit);
+        shadowRay.TMax = shadowTExit;
 
-        RayDesc ddaRay;
-        ddaRay.Origin = worldPosToGrid(shadowRay.Origin, lb, rt, tracker.dimensions);
-        ddaRay.Direction = worldDirToGrid(shadowRay.Direction, lb, rt, tracker.dimensions);
-        ddaRay.TMin = 0.f;
-        ddaRay.TMax = shadowTExit;
-        //tracker.t = 0.1f;
         tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
         tracker.dbg = false;
         tracker.LHS = 0;
         tracker.shadowRay = true;
-        // tracker.random = random.y;
-        // tracker.unit = record.rbfRadius * .5; //record.shadowUnit;
-        if (record.disableBlueNoise)
-        {
+        if (record.disableBlueNoise) {
           tracker.t = 0.f;
         }
         else {
           tracker.t = -record.unit * random.z * record.jitter;
         }
-        dda3(ddaRay, tracker.dimensions, false, tracker);
-
-        float ts = tracker.t;
-
-        // if (dbg) printf("shadow albedo %f %f %f %f\n", tracker.albedo.x, tracker.albedo.y, tracker.albedo.z, tracker.albedo.w);
-        // if (tracker.albedo.w > 0.f) {
-        //   visibility = 0.f;
-        // }
+        tracker.track(shadowRay);
 
         visibility = 1.f - tracker.albedo.w;
       }
@@ -419,16 +344,9 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   sppColor /= float(record.spp);
 
 
-  // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  
-  // float4 backgroundColor = float4(1.f, 1.f, 1.f, 1.f);
   float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);
 
   sppColor = over(sppColor, backgroundColor);
-
-  // if (!record.disableBlueNoise) {
-  //   accumID = 4;//min(accumID, 64);
-  // }
 
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
   float4 finalColor = (1.f / float(accumID)) * sppColor + (float(accumID - 1) / float(accumID)) * prevColor;
@@ -441,23 +359,13 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   // just the rendered image
   gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
 
-  // if (any(pixelID == centerID)) {
-  //   finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
-  // }
-
+  
   // Composite on top of everything else our user interface
   Texture2D texture = gprt::getTexture2DHandle(record.guiTexture);
   SamplerState sampler = gprt::getDefaultSampler();
   float4 guiColor = texture.SampleGrad(sampler, screen, float2(0.f, 0.f), float2(0.f, 0.f));
   
-
-
-  // temp
-  // random = lcg_randomf(rng);
-  // finalColor = float4(random, random, random, 1.f);
-  
   finalColor = over(guiColor, float4(finalColor.r, finalColor.g, finalColor.b, finalColor.a));
-
 
   gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(finalColor));
 }
@@ -506,7 +414,6 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   } else {
     payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density * pow(color.w, 3);
   }
-  // payload.color.a += color.a * hit_particle.density;
   
   if (record.clampMaxCumulativeValue > 0.f && !record.visualizeAttributes) {
     payload.density = min(payload.density, record.clampMaxCumulativeValue); 
