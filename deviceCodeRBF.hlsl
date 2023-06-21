@@ -253,103 +253,93 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   ParticleTracker tracker;
   
   float3 random;
-  float4 sppColor = float4(0.f, 0.f, 0.f, 0.f);
-  for (int sppi = 0; sppi < record.spp; ++sppi) {
+  
+  gprt::Texture stbnHandle = gprt::load<gprt::Texture>(record.stbnBuffer, frameID % 64);
+  Texture2D stbn = gprt::getTexture2DHandle(stbnHandle);
 
-    gprt::Texture stbnHandle = gprt::load<gprt::Texture>(record.stbnBuffer, (frameID * record.spp + sppi) % 64);
-    Texture2D stbn = gprt::getTexture2DHandle(stbnHandle);
-
-    if (!record.disableBlueNoise) {
-      random = stbn[int2(pixelID.x % 128,pixelID.y % 128)].rgb;
-      tracker.doMarching = true;
-      // random = pow(random, 2.2f); // not sure if this is needed or not...
-    }  
-    else {
-      random = float3(lcg_randomf(rng), lcg_randomf(rng), lcg_randomf(rng));
-      tracker.doMarching = false;
-      tracker.rng = rng;
-    }
-
-
-    tracker.disableColorCorrection = record.disableColorCorrection;
-    tracker.i = 0;
-    tracker.LHS = 0;
-    tracker.random = random.x;  
-    tracker.unit = record.unit;
-    tracker.visualizeAttributes = record.visualizeAttributes;
-    tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
-    tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
-    tracker.dbg = false;
-    tracker.cmap = record.colormap;
-    tracker.dmap = record.densitymap;
-    tracker.cmapSampler = record.colormapSampler;
-    tracker.tree = record.world;
-    tracker.lb = lb;
-    tracker.rt = rt;
-    tracker.shadowRay = false;
-    float4 color = float4(0.f, 0.f, 0.f, 0.f);
-
-    if (tenter < texit) {
-      bool dbg = false;
-      if (all(pixelID == centerID)) {
-        dbg = true;
-        tracker.dbg = true;
-      }
-      rayDesc.TMax = texit;
-      tracker.t = tenter + record.unit * random.y * record.jitter;
-      tracker.track(rayDesc);
-
-      float4 albedo = tracker.albedo;
-      float t = tracker.t;
-      float unit = record.unit;
-      float majorantExtinction = 1.f;
-
-      // NEE shadow ray
-      //   if we hit something and want to cast a shadow
-      float visibility = 1.f;
-      if (albedo.a > 0.f && record.light.ambient != 1.f) {
-        float shadowTEnter, shadowTExit;
-        RayDesc shadowRay;
-        shadowRay.Origin = rayDesc.Origin + rayDesc.Direction * t;
-        shadowRay.Direction = getLightDirection(record.light.azimuth, record.light.elevation);
-        shadowRay.TMin = 0.f; 
-        shadowRay.TMax = 10000.f;
-        aabbIntersection(shadowRay, lb, rt, shadowTEnter, shadowTExit);
-        shadowRay.TMax = shadowTExit;
-
-        tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
-        tracker.dbg = false;
-        tracker.LHS = 0;
-        tracker.shadowRay = true;
-        if (record.disableBlueNoise) {
-          tracker.t = 0.f;
-        }
-        else {
-          tracker.t = -record.unit * random.z * record.jitter;
-        }
-        tracker.track(shadowRay);
-
-        visibility = 1.f - tracker.albedo.w;
-      }
-
-      if (albedo.w == 1.f) {
-        color.rgb = albedo.rgb * visibility * (1.f - record.light.ambient) + albedo.rgb * record.light.ambient;
-        color.w = 1.f;
-      }
-    }
-
-    sppColor += color;
+  if (!record.disableBlueNoise) {
+    random = stbn[int2(pixelID.x % 128,pixelID.y % 128)].rgb;
+    tracker.doMarching = true;
+  }  
+  else {
+    random = float3(lcg_randomf(rng), lcg_randomf(rng), lcg_randomf(rng));
+    tracker.doMarching = false;
+    tracker.rng = rng;
   }
 
-  sppColor /= float(record.spp);
+  tracker.disableColorCorrection = record.disableColorCorrection;
+  tracker.i = 0;
+  tracker.LHS = 0;
+  tracker.random = random.x;  
+  tracker.unit = record.unit;
+  tracker.visualizeAttributes = record.visualizeAttributes;
+  tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
+  tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
+  tracker.dbg = false;
+  tracker.cmap = record.colormap;
+  tracker.dmap = record.densitymap;
+  tracker.cmapSampler = record.colormapSampler;
+  tracker.tree = record.world;
+  tracker.lb = lb;
+  tracker.rt = rt;
+  tracker.shadowRay = false;
+  float4 color = float4(0.f, 0.f, 0.f, 0.f);
 
+  if (tenter < texit) {
+    bool dbg = false;
+    if (all(pixelID == centerID)) {
+      dbg = true;
+      tracker.dbg = true;
+    }
+    rayDesc.TMax = texit;
+    tracker.t = tenter + record.unit * random.y * record.jitter;
+    tracker.track(rayDesc);
+
+    float4 albedo = tracker.albedo;
+    float t = tracker.t;
+    float unit = record.unit;
+    float majorantExtinction = 1.f;
+
+    // NEE shadow ray
+    //   if we hit something and want to cast a shadow
+    float visibility = 1.f;
+    if (albedo.a > 0.f && record.light.ambient != 1.f) {
+      float shadowTEnter, shadowTExit;
+      RayDesc shadowRay;
+      shadowRay.Origin = rayDesc.Origin + rayDesc.Direction * t;
+      shadowRay.Direction = getLightDirection(record.light.azimuth, record.light.elevation);
+      shadowRay.TMin = 0.f; 
+      shadowRay.TMax = 10000.f;
+      aabbIntersection(shadowRay, lb, rt, shadowTEnter, shadowTExit);
+      shadowRay.TMax = shadowTExit;
+
+      tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
+      tracker.dbg = false;
+      tracker.LHS = 0;
+      tracker.shadowRay = true;
+      if (record.disableBlueNoise) {
+        tracker.t = 0.f;
+      }
+      else {
+        tracker.t = -record.unit * random.z * record.jitter;
+      }
+      tracker.track(shadowRay);
+
+      visibility = 1.f - tracker.albedo.w;
+    }
+
+    if (albedo.w == 1.f) {
+      color.rgb = albedo.rgb * visibility * (1.f - record.light.ambient) + albedo.rgb * record.light.ambient;
+      color.w = 1.f;
+    }
+  }
 
   float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);
 
-  sppColor = over(sppColor, backgroundColor);
+  color = over(color, backgroundColor);
 
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
-  float4 finalColor = (1.f / float(accumID)) * sppColor + (float(accumID - 1) / float(accumID)) * prevColor;
+  float4 finalColor = (1.f / float(accumID)) * color + (float(accumID - 1) / float(accumID)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
   // exposure and gamma
@@ -357,17 +347,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   finalColor.rgb = pow(finalColor.rgb, record.gamma);
 
   // just the rendered image
-  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
-
-  
-  // Composite on top of everything else our user interface
-  Texture2D texture = gprt::getTexture2DHandle(record.guiTexture);
-  SamplerState sampler = gprt::getDefaultSampler();
-  float4 guiColor = texture.SampleGrad(sampler, screen, float2(0.f, 0.f), float2(0.f, 0.f));
-  
-  finalColor = over(guiColor, float4(finalColor.r, finalColor.g, finalColor.b, finalColor.a));
-
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(finalColor));
+  gprt::store(record.imageBuffer, fbOfs, finalColor);
 }
 
 GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {

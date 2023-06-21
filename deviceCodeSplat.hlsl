@@ -135,6 +135,8 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
             color.w = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).r;
           }
 
+          color.w *= exp(-record.unit * particlesPerSlab);
+
           result_color = over(result_color, color);
            
           // float alpha_1msa = color.a * (1.0 - result_color.a);
@@ -153,18 +155,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
   result_color = over(result_color, backgroundColor);
 
-  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(result_color));
-
-  // if (any(pixelID == centerID))
-  //   result_color.rgb = float3(1.f, 1.f, 1.f) - result_color.rgb;
-
-    // Composite on top of everything else our user interface
-  Texture2D guiTexture = gprt::getTexture2DHandle(record.guiTexture);
-  SamplerState guiSampler = gprt::getDefaultSampler();
-  float4 guiColor = guiTexture.SampleGrad(guiSampler, screen, float2(0.f, 0.f), float2(0.f, 0.f));
-  result_color = over(guiColor, float4(result_color.r, result_color.g, result_color.b, 1.f));
-
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(result_color));
+  gprt::store(record.imageBuffer, fbOfs, result_color);
 }
 
 GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {

@@ -53,10 +53,14 @@ struct ParticleData {
 
 struct RayGenData {
   alignas(16) gprt::Texture guiTexture;
+  alignas(16) gprt::Texture imageTexture;
   alignas(16) gprt::Buffer frameBuffer;
   alignas(16) gprt::Buffer imageBuffer;
+  alignas(16) gprt::Buffer taaBuffer;
+  alignas(16) gprt::Buffer taaPrevBuffer;
   alignas(16) gprt::Buffer accumBuffer;
   alignas(16) gprt::Buffer stbnBuffer;
+  alignas(8) int2 fbSize;
   alignas(4) uint32_t accumID;
   alignas(4) uint32_t frameID;
 
@@ -112,7 +116,6 @@ struct RayGenData {
     alignas(16) float3 dir_dv;
   } camera;
 
-  alignas(4) int spp;
   alignas(4) float exposure;
   alignas(4) float gamma;
 };

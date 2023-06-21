@@ -71,7 +71,7 @@ extern GPRTProgram deviceCodeVoxel;
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
 // const int2 fbSize = {1024, 1024}; // benchmark size
-const int2 fbSize = {1280, 720};
+const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -174,7 +174,7 @@ int main(int argc, char *argv[]) {
         for (int y = 0; y < 10; ++y) {
           for (int x = 0; x < 10; ++x) {
             uint32_t i = x + y * 10 + z * 10 * 10;
-            float t1 = float(i) / float(particleData[frame].size());
+            float t1 = float(y) / float(10.f);
             float t2 = (float(frame) / float(particleData.size()));
 
             particleData[frame][i].second =
@@ -331,6 +331,8 @@ int main(int argc, char *argv[]) {
       context, moduleCommon, "AccumulateRBFBounds");
   auto AverageRBFBounds =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "AverageRBFBounds");
+  auto CompositeGui =
+      gprtComputeCreate<RayGenData>(context, moduleCommon, "CompositeGui");
 
   auto particleType = gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
   gprtGeomTypeSetIntersectionProg(particleType, 1, moduleSplat,
@@ -357,11 +359,20 @@ int main(int argc, char *argv[]) {
 
   auto frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
-  auto imageBuffer =
-      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   auto accumBuffer =
       gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
-#ifndef HEADLESS
+  auto imageBuffer =
+      gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  auto taaBuffer = gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  auto taaPrevBuffer =
+      gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
+  auto imageTexture = gprtDeviceTextureCreate<float4>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
+      fbSize.y, 1, false, nullptr);
+  // auto imageTexture = gprtDeviceTextureCreate<float4>(
+  //     context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
+  //     fbSize.y, 1, false, nullptr);
+
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x,
       fbSize.y, 1, false, nullptr);
@@ -369,7 +380,8 @@ int main(int argc, char *argv[]) {
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_D32_SFLOAT, fbSize.x, fbSize.y,
       1, false, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
-#endif
+
+  raygenData.fbSize = fbSize;
 
   // Blue noise
   std::vector<GPRTTextureOf<stbi_uc>> stbn(64);
@@ -413,17 +425,17 @@ int main(int argc, char *argv[]) {
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
+  raygenData.taaBuffer = gprtBufferGetHandle(taaBuffer);
+  raygenData.taaPrevBuffer = gprtBufferGetHandle(taaPrevBuffer);
   raygenData.stbnBuffer = gprtBufferGetHandle(stbnBuffer);
   raygenData.exposure = 1.f;
   raygenData.gamma = 1.0f;
-  raygenData.spp = 1;
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
   raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
-#ifndef HEADLESS
   raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
-#endif
+  raygenData.imageTexture = gprtTextureGetHandle(imageTexture);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
   raygenData.disableColorCorrection = false;
@@ -698,23 +710,15 @@ int main(int argc, char *argv[]) {
 
     static float exposure = 1.f;
     static float gamma = 1.0f;
-    static int spp = 1;
     ini.get_float("exposure", exposure);
     ini.get_float("gamma", gamma);
-    ini.get_int32("spp", spp);
-    ImGui::DragInt("Samples", &spp, 1, 1, 64);
     ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
     ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
     raygenData.exposure = exposure;
     raygenData.gamma = gamma;
-    raygenData.spp = spp;
 
-#ifdef HEADLESS
-    bool fovChanged = firstFrame;
-#else
     bool fovChanged =
         ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f);
-#endif
 
     static int mode = 1;
     ini.get_int32("mode", mode);
@@ -907,7 +911,7 @@ int main(int argc, char *argv[]) {
 
     static float sigma = 3.f;
     static float clampMaxCumulativeValue = 1.f;
-    static float unit = previousParticleRadius;
+    static float unit = previousParticleRadius * .1f;
     static float jitter = 1.f;
     ini.get_float("sigma", sigma);
     ini.get_float("clampMaxCumulativeValue", clampMaxCumulativeValue);
@@ -975,6 +979,10 @@ int main(int argc, char *argv[]) {
 
     double accelBuildTime = 0.0;
     if (previousParticleFrame != particleFrame || forceRebuild) {
+
+      azimuth = sin(gprtGetTime(context)) * .5 + .5;
+      elevation = cos(gprtGetTime(context));
+
       // std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord.numParticles = particles[particleFrame].size();
       particleRecord.rbfRadius = previousParticleRadius;
@@ -1076,6 +1084,8 @@ int main(int argc, char *argv[]) {
     gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
     gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
 
+    gprtComputeSetParameters(CompositeGui, &raygenData);
+
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
 
     gprtBeginProfile(context);
@@ -1101,6 +1111,11 @@ int main(int argc, char *argv[]) {
     char title[1000];
     sprintf(title, "%.2f FPS", (1.0 / tavg));
 
+    gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
+                          fbSize.x, fbSize.y, 1);
+
+    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y);
+
     gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
 
@@ -1108,6 +1123,9 @@ int main(int argc, char *argv[]) {
     ;
     frameID++;
     ;
+
+    gprtBufferCopy(context, taaBuffer, taaPrevBuffer, 0, 0,
+                   fbSize.x * fbSize.y);
 
     // Clear .ini file so we don't read entries from it
     // during the next loop iteration!

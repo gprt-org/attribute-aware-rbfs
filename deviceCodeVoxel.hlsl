@@ -131,14 +131,10 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
 
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
   float4 finalColor = (1.f / float(accumID)) * color + (float(accumID - 1) / float(accumID)) * prevColor;
+
+  if (all(pixelID == record.fbSize / 2)) printf("Prev %f %f %f %f\n",
+    prevColor.x, prevColor.y, prevColor.z, prevColor.w 
+  );
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
-
-  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
-
-  // Composite on top of everything else our user interface
-  Texture2D texture = gprt::getTexture2DHandle(record.guiTexture);
-  SamplerState sampler = gprt::getDefaultSampler();
-  float4 guiColor = texture.SampleGrad(sampler, screen, float2(0.f, 0.f), float2(0.f, 0.f));
-  finalColor = over(guiColor, float4(finalColor.r, finalColor.g, finalColor.b, finalColor.a));
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(finalColor));
+  gprt::store(record.imageBuffer, fbOfs, finalColor);
 }
