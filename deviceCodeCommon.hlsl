@@ -251,32 +251,37 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
 
   // get the neighborhood min / max from this frame's render
   float4 center = imageTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
-  
-  float3 minColor = rgb2ycocg(center.rgb);
-  float3 maxColor = rgb2ycocg(center.rgb);
-  for (int iy = -1; iy <= 1; ++iy)
-  {
-      for (int ix = -1; ix <= 1; ++ix)
-      {          
-        if (ix == 0 && iy == 0) continue;
 
-        float2 offsetUV = ((fragCoord + float2(ix, iy)) / record.fbSize.xy);
-        float3 color = imageTexture.SampleGrad(sampler, offsetUV, float2(0.f, 0.f), float2(0.f, 0.f)).rgb;
-        color = rgb2ycocg(color);
-        minColor = min(minColor, color);
-        maxColor = max(maxColor, color);
-      }
+  float4 pixelColor;
+  if (!record.disableTAA) {  
+    float3 minColor = rgb2ycocg(center.rgb);
+    float3 maxColor = rgb2ycocg(center.rgb);
+    for (int iy = -1; iy <= 1; ++iy)
+    {
+        for (int ix = -1; ix <= 1; ++ix)
+        {          
+          if (ix == 0 && iy == 0) continue;
+
+          float2 offsetUV = ((fragCoord + float2(ix, iy)) / record.fbSize.xy);
+          float3 color = imageTexture.SampleGrad(sampler, offsetUV, float2(0.f, 0.f), float2(0.f, 0.f)).rgb;
+          color = rgb2ycocg(color);
+          minColor = min(minColor, color);
+          maxColor = max(maxColor, color);
+        }
+    }
+
+    float4 old = gprt::load<float4>(record.taaPrevBuffer, fbOfs);
+    
+    // get last frame's pixel and clamp it to the neighborhood of this frame
+    old.rgb = ycocg2rgb(max(rgb2ycocg(old.rgb), minColor));
+    old.rgb = ycocg2rgb(min(rgb2ycocg(old.rgb), maxColor));
+
+    float lerpAmount = .4f;
+    pixelColor = lerp(old, center, lerpAmount);        
+    gprt::store(record.taaBuffer, fbOfs, pixelColor);
+  } else {
+    pixelColor = center;
   }
-
-  float4 old = gprt::load<float4>(record.taaPrevBuffer, fbOfs);
-  
-  // get last frame's pixel and clamp it to the neighborhood of this frame
-  old.rgb = ycocg2rgb(max(rgb2ycocg(old.rgb), minColor));
-  old.rgb = ycocg2rgb(min(rgb2ycocg(old.rgb), maxColor));
-
-  float lerpAmount = .4f;
-  float4 pixelColor = lerp(old, center, lerpAmount);        
-  gprt::store(record.taaBuffer, fbOfs, pixelColor);
 
   // Composite on top of everything else our user interface
   Texture2D guiTexture = gprt::getTexture2DHandle(record.guiTexture);

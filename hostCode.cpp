@@ -70,8 +70,8 @@ extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
-// const int2 fbSize = {1024, 1024}; // benchmark size
-const int2 fbSize = {1920, 1080};
+const int2 fbSize = {1024, 1024}; // benchmark size
+// const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -440,6 +440,7 @@ int main(int argc, char *argv[]) {
   raygenData.globalAABBMax = aabb[1];
   raygenData.disableColorCorrection = false;
   raygenData.disableBlueNoise = false;
+  raygenData.disableTAA = true;
   // raygenData.rbfRadius = rbfRadius;
 
   MissProgData *missData = gprtMissGetParameters(miss);
@@ -596,10 +597,11 @@ int main(int argc, char *argv[]) {
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = 0.05f * diagonal;
+  float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool playAnimation = true;
   static bool disableBlueNoise = false;
+  static bool disableTAA = true;
   std::stringstream frameStats;
   do {
     ImGuiIO &io = ImGui::GetIO();
@@ -704,6 +706,12 @@ int main(int argc, char *argv[]) {
 
     if (ImGui::Checkbox("Disable Blue Noise", &disableBlueNoise)) {
       raygenData.disableBlueNoise = disableBlueNoise;
+      voxelized = false;
+      accumID = 1;
+    }
+
+    if (ImGui::Checkbox("Disable Temporal Antialiasing", &disableTAA)) {
+      raygenData.disableTAA = disableTAA;
       voxelized = false;
       accumID = 1;
     }
@@ -937,7 +945,6 @@ int main(int argc, char *argv[]) {
     ini.get_bool("visualizeAttributes", visualizeAttributes);
     if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes)) {
       accumID = 1;
-      // majorantsOutOfDate = true; // might do this later...
       voxelized = false;
     }
 
@@ -980,10 +987,11 @@ int main(int argc, char *argv[]) {
     double accelBuildTime = 0.0;
     if (previousParticleFrame != particleFrame || forceRebuild) {
 
-      azimuth = sin(gprtGetTime(context)) * .5 + .5;
-      elevation = cos(gprtGetTime(context));
+      if (synthetic) {
+        azimuth = sin(gprtGetTime(context)) * .5 + .5;
+        elevation = cos(gprtGetTime(context));
+      }
 
-      // std::cout<<"Num particles "<< particles[particleFrame].size();
       particleRecord.numParticles = particles[particleFrame].size();
       particleRecord.rbfRadius = previousParticleRadius;
       raygenData.numParticles = particles[particleFrame].size();

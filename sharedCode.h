@@ -103,6 +103,8 @@ struct RayGenData {
 
   alignas(4) int disableBlueNoise;
 
+  alignas(4) int disableTAA;
+
   struct {
     alignas(4) float azimuth;
     alignas(4) float elevation;
