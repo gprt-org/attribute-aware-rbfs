@@ -276,7 +276,7 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
     old.rgb = ycocg2rgb(max(rgb2ycocg(old.rgb), minColor));
     old.rgb = ycocg2rgb(min(rgb2ycocg(old.rgb), maxColor));
 
-    float lerpAmount = .4f;
+    float lerpAmount = .2f;
     pixelColor = lerp(old, center, lerpAmount);        
     gprt::store(record.taaBuffer, fbOfs, pixelColor);
   } else {
