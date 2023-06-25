@@ -70,7 +70,7 @@ extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
-const int2 fbSize = {1024, 1024}; // benchmark size
+const int2 fbSize = {512, 512}; // benchmark size
 // const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
@@ -319,7 +319,8 @@ int main(int argc, char *argv[]) {
 #endif
   gprtRequestRayTypeCount(2);
 
-  GPRTContext context = gprtContextCreate();
+  int32_t GPU = 0;
+  GPRTContext context = gprtContextCreate(&GPU);
   GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);
   GPRTModule moduleSplat = gprtModuleCreate(context, deviceCodeSplat);
   GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
@@ -684,7 +685,6 @@ int main(int argc, char *argv[]) {
       for (uint32_t i = 0; i < 64; ++i) {
         auto result =
             densitymapWidget.gradient().at(ImGG::RelativePosition(i / 63.f));
-        std::cout << "density " << result.x << std::endl;
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
@@ -1112,8 +1112,8 @@ int main(int argc, char *argv[]) {
       break;
     }
 
-    double profile = gprtEndProfile(context) / 1e9;
-    static double tavg = profile;
+    float profile = gprtEndProfile(context);
+    static float tavg = profile;
     tavg = 0.8 * tavg + 0.2 * profile;
 
     char title[1000];
