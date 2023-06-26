@@ -47,6 +47,7 @@ struct ParticleData {
 
   alignas(16) gprt::Buffer particles;
   alignas(16) gprt::Buffer aabbs;
+  alignas(4) int numAABBs;
 
   alignas(4) int disableColorCorrection;
 };

@@ -24,8 +24,10 @@
 
 #include "rng.h"
 
-GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
+GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1024, 1, 1)) {
   uint32_t clusterID = DispatchThreadID.x; 
+  if (clusterID >= record.numAABBs) return;
+
   uint32_t particlesPerLeaf = record.particlesPerLeaf;
   uint32_t numParticles = record.numParticles;
   float radius = record.rbfRadius;

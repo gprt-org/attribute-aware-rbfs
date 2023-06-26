@@ -459,10 +459,9 @@ int main(int argc, char *argv[]) {
 
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
-  auto aabbBuffer = gprtDeviceBufferCreate<float3>(
-      context,
-      2 * ((maxNumParticles + particlesPerLeaf - 1) / particlesPerLeaf),
-      nullptr);
+  int numAABBs = ((maxNumParticles + particlesPerLeaf - 1) / particlesPerLeaf);
+  auto aabbBuffer =
+      gprtDeviceBufferCreate<float3>(context, 2 * numAABBs, nullptr);
   auto particleGeom = gprtGeomCreate<ParticleData>(context, particleType);
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
                         ((maxNumParticles + particlesPerLeaf - 1) /
@@ -472,6 +471,8 @@ int main(int argc, char *argv[]) {
 
   // particleRecord.numParticles = particles[0].size();
   particleRecord.particlesPerLeaf = particlesPerLeaf;
+  particleRecord.numAABBs = numAABBs;
+
   // particleRecord.rbfRadius = rbfRadius;
   particleRecord.aabbs = gprtBufferGetHandle(aabbBuffer);
   particleRecord.particles = gprtBufferGetHandle(particleBuffer);
@@ -1010,9 +1011,36 @@ int main(int argc, char *argv[]) {
 
       // Generate bounding boxes for those particles
       // note, unneeded boxes will be inactivated.
-      gprtComputeLaunch1D(context, GenRBFBounds,
-                          (maxNumParticles + (particlesPerLeaf - 1)) /
-                              particlesPerLeaf);
+      int numWorkGroups =
+          (numAABBs + 1023) / 1024; // 1024 threads per workgroup
+      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups);
+
+      bool testCompute = false;
+      if (testCompute) {
+        gprtBufferMap(aabbBuffer);
+        gprtBufferMap(particleBuffer);
+        float3 *aabbs = gprtBufferGetPointer(aabbBuffer);
+        float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
+
+        for (uint32_t i = 0; i < maxNumParticles; ++i) {
+          if (particlePositions[i].x < aabbs[i * 2 + 0].x)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].y < aabbs[i * 2 + 0].y)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].z < aabbs[i * 2 + 0].z)
+            throw std::runtime_error("Error");
+
+          if (particlePositions[i].x > aabbs[i * 2 + 1].x)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].y > aabbs[i * 2 + 1].y)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].z > aabbs[i * 2 + 1].z)
+            throw std::runtime_error("Error");
+        }
+
+        gprtBufferUnmap(particleBuffer);
+        gprtBufferUnmap(aabbBuffer);
+      }
 
       // Now we can build the tree
       double beforeAccelBuild = getCurrentTime();
@@ -1044,9 +1072,36 @@ int main(int argc, char *argv[]) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
 
       // Regenerate bounding boxes for new radius
-      gprtComputeLaunch1D(context, GenRBFBounds,
-                          (maxNumParticles + (particlesPerLeaf - 1)) /
-                              particlesPerLeaf);
+      int numWorkGroups =
+          (numAABBs + 1023) / 1024; // 1024 threads per workgroup
+      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups);
+
+      bool testCompute = false;
+      if (testCompute) {
+        gprtBufferMap(aabbBuffer);
+        gprtBufferMap(particleBuffer);
+        float3 *aabbs = gprtBufferGetPointer(aabbBuffer);
+        float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
+
+        for (uint32_t i = 0; i < maxNumParticles; ++i) {
+          if (particlePositions[i].x < aabbs[i * 2 + 0].x)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].y < aabbs[i * 2 + 0].y)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].z < aabbs[i * 2 + 0].z)
+            throw std::runtime_error("Error");
+
+          if (particlePositions[i].x > aabbs[i * 2 + 1].x)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].y > aabbs[i * 2 + 1].y)
+            throw std::runtime_error("Error");
+          if (particlePositions[i].z > aabbs[i * 2 + 1].z)
+            throw std::runtime_error("Error");
+        }
+
+        gprtBufferUnmap(particleBuffer);
+        gprtBufferUnmap(aabbBuffer);
+      }
 
       // Now we can refit the tree
       double beforeAccelUpdate = getCurrentTime();
@@ -1055,7 +1110,8 @@ int main(int argc, char *argv[]) {
       double afterAccelUpdate = getCurrentTime();
       accelUpdateTime = afterAccelUpdate - beforeAccelUpdate;
 
-      std::cout << "accel update time " << accelUpdateTime * 1000 << std::endl;
+      // std::cout << "accel update time " << accelUpdateTime * 1000 <<
+      // std::endl;
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
