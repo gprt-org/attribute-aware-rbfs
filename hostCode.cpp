@@ -1131,7 +1131,7 @@ int main(int argc, char *argv[]) {
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
       gprtBufferClear(voxelVolume);
       gprtBufferClear(voxelVolumeCount);
-      gprtComputeLaunch1D(context, AccumulateRBFBounds, particles[0].size());
+      gprtComputeLaunch1D(context, AccumulateRBFBounds, particles[particleFrame].size());
       gprtComputeLaunch1D(context, AverageRBFBounds, dims.x * dims.y * dims.z);
       voxelized = true;
     }
