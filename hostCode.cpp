@@ -70,8 +70,8 @@ extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
-// const int2 fbSize = {1024, 1024}; // benchmark size
-const int2 fbSize = {1920, 1080};
+const int2 fbSize = {512, 512}; // benchmark size
+// const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -1146,7 +1146,7 @@ int main(int argc, char *argv[])
     char title[1000];
     sprintf(title,"%.2f FPS",(1.0/tavg));
 
-    gprtSetWindowTitle(context, title);
+    // gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
 
     accumID ++;;
