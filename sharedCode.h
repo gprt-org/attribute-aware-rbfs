@@ -38,7 +38,7 @@ struct ParticleData {
   alignas(4) float clampMaxCumulativeValue;
   alignas(4) float sigma;
   alignas(4) float power;
-  
+
   // A switch to visualize either RBF density or per-particle attributes
   alignas(4) int visualizeAttributes;
   alignas(16) gprt::Texture colormap;
@@ -47,16 +47,21 @@ struct ParticleData {
 
   alignas(16) gprt::Buffer particles;
   alignas(16) gprt::Buffer aabbs;
+  alignas(4) int numAABBs;
 
   alignas(4) int disableColorCorrection;
 };
 
 struct RayGenData {
   alignas(16) gprt::Texture guiTexture;
+  alignas(16) gprt::Texture imageTexture;
   alignas(16) gprt::Buffer frameBuffer;
   alignas(16) gprt::Buffer imageBuffer;
+  alignas(16) gprt::Buffer taaBuffer;
+  alignas(16) gprt::Buffer taaPrevBuffer;
   alignas(16) gprt::Buffer accumBuffer;
   alignas(16) gprt::Buffer stbnBuffer;
+  alignas(8) int2 fbSize;
   alignas(4) uint32_t accumID;
   alignas(4) uint32_t frameID;
 
@@ -83,29 +88,23 @@ struct RayGenData {
   alignas(16) gprt::Buffer volumeCount;
   alignas(16) uint3 volumeDimensions;
 
-  // For DDA
-  alignas(16) gprt::Buffer minMaxVolume;
-  alignas(16) gprt::Buffer majorants;
-  alignas(16) uint3 ddaDimensions;
-
   // For controling the relative density of delta tracking
   alignas(4) float unit;
 
   // How much to jitter ray marching to reduce step artifacts
   alignas(4) float jitter;
-  
+
   // A switch to visualize either RBF density or per-particle attributes
   alignas(4) int visualizeAttributes;
-
-  // A switch to enable or disable DDA (accelerates volume rendering)
-  alignas(4) int useDDA;
 
   // If true, renders the time that it takes to render the given image
   alignas(4) int showHeatmap;
 
   alignas(4) int disableColorCorrection;
-  
+
   alignas(4) int disableBlueNoise;
+
+  alignas(4) int disableTAA;
 
   struct {
     alignas(4) float azimuth;
@@ -120,10 +119,8 @@ struct RayGenData {
     alignas(16) float3 dir_dv;
   } camera;
 
-  alignas(4) int spp;
   alignas(4) float exposure;
   alignas(4) float gamma;
-
 };
 
 /* variables for the miss program */
@@ -147,14 +144,14 @@ float3 getLightDirection(float azimuth, float elevation) {
 // r is the radius of the particle
 float evaluate_rbf(float3 X, float3 P, float r, float sigma) {
   // return exp(-.5 * pow(distance(X, P), 2.f) / pow(r / sigma, 2.f));
-  return exp(-.5 * pow( (distance(X, P) * sigma) / r, 2.f)); // / pow(, 2.f));
-
+  return exp(-.5 * pow((distance(X, P) * sigma) / r, 2.f)); // / pow(, 2.f));
 }
 
 float4 over(float4 a, float4 b) {
   float4 result;
   result.a = a.a + b.a * (1.f - a.a);
-  if (result.a == 0.f) return a; // avoid NaN
+  if (result.a == 0.f)
+    return a; // avoid NaN
   result.rgb = (a.rgb * a.a + b.rgb * b.a * (1.f - a.a)) / result.a;
   return result;
 }
@@ -201,31 +198,31 @@ bool aabbIntersection(in RayDesc rayDesc, float3 aabbMin, float3 aabbMax,
 // Implemented per Definition 2 of "Nearest Neighbor Queries" by
 // N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
 float minDist(float3 p, float3 rmin, float3 rmax) {
-	float sum = 0.0f;
+  float sum = 0.0f;
   for (int i = 0; i < 3; ++i) {
     // if point is left of min
     if (p[i] < rmin[i]) {
       // take distance to left wall
       float d = p[i] - rmin[i];
       sum += d * d;
-    } 
+    }
     // else if point is right of max
     else if (p[i] > rmax[i]) {
       // take distance to right wall
       float d = p[i] - rmax[i];
       sum += d * d;
-    } 
+    }
     // else point is between the two
     else {
       sum += 0;
-    } 
+    }
   }
   return sum;
 }
 
 // maxDist computes the square of the distance from a point to a rectangle.
 float maxDist(float3 p, float3 rmin, float3 rmax) {
-	float sum = 0.0f;
+  float sum = 0.0f;
   for (int i = 0; i < 3; ++i) {
     // take the max distance for this dimension and sum the square
     float d1 = abs(p[i] - rmin[i]);
@@ -243,38 +240,37 @@ float maxDist(float3 p, float3 rmin, float3 rmax) {
 // Implemented per Definition 4 of "Nearest Neighbor Queries" by
 // N. Roussopoulos, S. Kelley and F. Vincent, ACM SIGMOD, pages 71-79, 1995.
 float minMaxDist(float3 p, float3 rmin, float3 rmax) {
-	// by definition, MinMaxDist(p, r) =
-	// min{1<=k<=n}(|pk - rmk|^2 + sum{1<=i<=n, i != k}(|pi - rMi|^2))
-	// where rmk and rMk are defined as follows:
-	
-	// This formula can be computed in linear time by precomputing
-	// S = sum{1<=i<=n}(|pi - rMi|^2).
+  // by definition, MinMaxDist(p, r) =
+  // min{1<=k<=n}(|pk - rmk|^2 + sum{1<=i<=n, i != k}(|pi - rMi|^2))
+  // where rmk and rMk are defined as follows:
 
-	float S = 0.0f;
-	for (int i = 0; i < 3; ++i) {
-		float d = p[i] - ((p[i] >= (rmin[i]+rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
-		S += d * d;
-	}
+  // This formula can be computed in linear time by precomputing
+  // S = sum{1<=i<=n}(|pi - rMi|^2).
 
-	// Compute MinMaxDist using the precomputed S.
-	float minimum = 3.402823466e+38F;
-	for (int i = 0; i < 3; ++i)
-  {
-		float d1 = p[i] - ((p[i] >= (rmin[i]+rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
-		float d2 = p[i] - ((p[i] <= (rmin[i]+rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
-		float d = S - d1*d1 + d2*d2;
-		if (d < minimum) {
-			minimum = d;
-		}
-	}
+  float S = 0.0f;
+  for (int i = 0; i < 3; ++i) {
+    float d = p[i] - ((p[i] >= (rmin[i] + rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
+    S += d * d;
+  }
 
-	return minimum;
+  // Compute MinMaxDist using the precomputed S.
+  float minimum = 3.402823466e+38F;
+  for (int i = 0; i < 3; ++i) {
+    float d1 = p[i] - ((p[i] >= (rmin[i] + rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
+    float d2 = p[i] - ((p[i] <= (rmin[i] + rmax[i]) / 2.f) ? rmin[i] : rmax[i]);
+    float d = S - d1 * d1 + d2 * d2;
+    if (d < minimum) {
+      minimum = d;
+    }
+  }
+
+  return minimum;
 }
 
 // minDist computes the square of the distance from rectangle A to rectangle B.
 // If the rectangles touch then the distance is zero.
 // https://gist.github.com/dGr8LookinSparky/bd64a9f5f9deecf61e2c3c1592169c00
-float minDist(float3 armin, float3 armax, float3 brmin, float3 brmax) { 
+float minDist(float3 armin, float3 armax, float3 brmin, float3 brmax) {
   float sum = 0.f;
   for (int i = 0; i < 3; ++i) {
     // if the right of b is less than the left of a
@@ -283,7 +279,7 @@ float minDist(float3 armin, float3 armax, float3 brmin, float3 brmax) {
       float dist = brmax[i] - armin[i];
       // L2 dist
       sum += dist * dist;
-    } 
+    }
     // if the left of b is greater than the right of a
     else if (brmin[i] > armax[i]) {
       // take the distance between these two walls
@@ -297,7 +293,7 @@ float minDist(float3 armin, float3 armax, float3 brmin, float3 brmax) {
 
 // maxDist computes the square of the distance from rectangle A to rectangle B.
 float maxDist(float3 armin, float3 armax, float3 brmin, float3 brmax) {
-	float sum = 0.0f;
+  float sum = 0.0f;
   for (int i = 0; i < 3; ++i) {
     // take the max distance for this dimension and sum the square
     float d1 = abs(armin[i] - brmin[i]);
@@ -310,7 +306,8 @@ float maxDist(float3 armin, float3 armax, float3 brmin, float3 brmax) {
   return sum;
 }
 
-float3 worldPosToGrid(float3 worldPt, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+float3 worldPosToGrid(float3 worldPt, float3 worldAABBMin, float3 worldAABBMax,
+                      uint3 gridDimensions) {
   float3 gridPt = worldPt;
   // translate so that world AABB min is origin
   gridPt = gridPt - worldAABBMin;
@@ -322,7 +319,8 @@ float3 worldPosToGrid(float3 worldPt, float3 worldAABBMin, float3 worldAABBMax, 
   return gridPt;
 }
 
-float3 gridPosToWorld(float3 gridPt, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+float3 gridPosToWorld(float3 gridPt, float3 worldAABBMin, float3 worldAABBMax,
+                      uint3 gridDimensions) {
   float3 worldPt = gridPt;
   // scale down by the grid
   worldPt = worldPt / float3(gridDimensions);
@@ -333,7 +331,8 @@ float3 gridPosToWorld(float3 gridPt, float3 worldAABBMin, float3 worldAABBMax, u
   return worldPt;
 }
 
-float3 worldDirToGrid(float3 worldDir, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+float3 worldDirToGrid(float3 worldDir, float3 worldAABBMin, float3 worldAABBMax,
+                      uint3 gridDimensions) {
   float3 gridDir = worldDir;
   // scale down by the span of the world AABB
   gridDir = gridDir / (worldAABBMax - worldAABBMin);
@@ -343,7 +342,8 @@ float3 worldDirToGrid(float3 worldDir, float3 worldAABBMin, float3 worldAABBMax,
   return gridDir;
 }
 
-float3 gridDirToWorld(float3 gridDir, float3 worldAABBMin, float3 worldAABBMax, uint3 gridDimensions) {
+float3 gridDirToWorld(float3 gridDir, float3 worldAABBMin, float3 worldAABBMax,
+                      uint3 gridDimensions) {
   float3 worldDir = gridDir;
   // scale down by the grid
   worldDir = worldDir / float3(gridDimensions);

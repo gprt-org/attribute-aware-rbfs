@@ -24,15 +24,10 @@
 
 #include "rng.h"
 
-GPRT_COMPUTE_PROGRAM(GenParticles, (ParticleData, record), (1, 1, 1)) {
-  int primID = DispatchThreadID.x;
-  float t = float(primID) / float(record.numParticles);
-  float4 particle = float4(t * sin(t * 256.f * 3.14f),  t * cos(t * 256.f * 3.14f), t * sin(t * 256.f * 3.14f) * cos(t * 256.f * 3.14f), 1.f);
-  gprt::store<float4>(record.particles, primID, particle);
-}
-
-GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1, 1, 1)) {
+GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1024, 1, 1)) {
   uint32_t clusterID = DispatchThreadID.x; 
+  if (clusterID >= record.numAABBs) return;
+
   uint32_t particlesPerLeaf = record.particlesPerLeaf;
   uint32_t numParticles = record.numParticles;
   float radius = record.rbfRadius;
@@ -206,142 +201,95 @@ GPRT_COMPUTE_PROGRAM(AverageRBFBounds, (RayGenData, record), (1,1,1)) {
   }
 }
 
-GPRT_COMPUTE_PROGRAM(ClearMinMaxGrid, (RayGenData, record), (1,1,1)) {
-  int voxelID = DispatchThreadID.x;
-  // clearing rbf density range to 0,0, since this will ultimately be a sum.
-  // clearing attribute density to inf, 0 since there we're taking min/max
-  gprt::store<float4>(record.minMaxVolume, voxelID, float4(0.f, 0.f, 1e20f, 0.f));
-
-  // if (voxelID == 0) printf("TEST\n");
+float3 rgb2ycocg(in float3 rgb)
+{
+    float co = rgb.r - rgb.b;
+    float t = rgb.b + co / 2.0;
+    float cg = rgb.g - t;
+    float y = t + cg / 2.0;
+    return float3(y, co, cg);
 }
 
-GPRT_COMPUTE_PROGRAM(MinMaxRBFBounds, (RayGenData, record), (1,1,1)) {
-  float radius = record.rbfRadius; // prior work just set this to some global constant.
-  float3 aabbMin;
-  float3 aabbMax;
-  int particlesPerLeaf = record.particlesPerLeaf;
-  
-  float attributeMin, attributeMax;
 
-  // need this check since particles per frame can vary
-  if (DispatchThreadID.x * particlesPerLeaf > record.numParticles) return;
-   
-  // compute bounding box
-  for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
-    int primID = DispatchThreadID.x * particlesPerLeaf + i;
-    if (i >= record.numParticles) break;
+float3 ycocg2rgb(in float3 ycocg)
+{
+    float t = ycocg.r - ycocg.b / 2.0;
+    float g = ycocg.b + t;
+    float b = t - ycocg.g / 2.0;
+    float r = ycocg.g + b;
+    return float3(r, g, b);
+}
+
+float3 clipToAABB(in float3 cOld, in float3 cNew, in float3 centre, in float3 halfSize)
+{
+    if (all(abs(cOld - centre) <= halfSize)) {
+        return cOld;
+    }
     
-    float4 particle = gprt::load<float4>(record.particles, primID);
-
-    if (i == 0) {
-      aabbMin = particle.xyz - float3(radius, radius, radius);
-      aabbMax = particle.xyz + float3(radius, radius, radius);
-      attributeMin = attributeMax = particle.w;
-    } else {
-      aabbMin = min(aabbMin, particle.xyz - float3(radius, radius, radius));
-      aabbMax = max(aabbMax, particle.xyz + float3(radius, radius, radius));
-      attributeMin = min(attributeMin, particle.w);
-      attributeMax = max(attributeMax, particle.w);
+    float3 dir = (cNew - cOld);
+    float3 near = centre - sign(dir) * halfSize;
+    float3 tAll = (near - cOld) / dir;
+    float t = 1e20;
+    for (int i = 0; i < 3; i++) {
+        if (tAll[i] >= 0.0 && tAll[i] < t) {
+            t = tAll[i];
+        }
     }
-  }
-
-  float3 rt = record.globalAABBMax + record.rbfRadius;
-  float3 lb = record.globalAABBMin - record.rbfRadius;
-  int3 dims = record.ddaDimensions;
-
-  float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
-
-  // transform particle into voxel space
-  float3 gridAabbMin = worldPosToGrid(aabbMin, lb, rt, dims);;
-  float3 gridAabbMax = worldPosToGrid(aabbMax, lb, rt, dims);;
-
-  // just in case points touch sides, clamp
-  gridAabbMin = clamp(gridAabbMin, 0, dims - 1);
-  gridAabbMax = clamp(gridAabbMax, 0, dims - 1);
-
-  // rasterize particle to all voxels it touches
-  for (uint z = gridAabbMin.z; z <= gridAabbMax.z; ++z) {
-    for (uint y = gridAabbMin.y; y <= gridAabbMax.y; ++y) {
-      for (uint x = gridAabbMin.x; x <= gridAabbMax.x; ++x) {
-        uint32_t addr = x + y * dims.x + z * dims.x * dims.y;
-
-        // Find the nearest and farthest corners using 
-        
-        // voxel space       
-        float3 lbPt = float3(x, y, z); 
-        float3 rtPt = float3(x, y, z) + 1.f;
-
-        lbPt = gridPosToWorld(lbPt, lb, rt, dims);
-        rtPt = gridPosToWorld(rtPt, lb, rt, dims);
-
-        // evaluate the RBF at these two extremes
-        float minDensity, maxDensity;
-
-        // note, distances here are squared
-        // float mnd = minDist(aabbMin, aabbMax, lbPt, rtPt);
-        // float mxd = maxDist(aabbMin, aabbMax, lbPt, rtPt);
-
-        // if (DispatchThreadID.x == 0) {
-        //   printf("min %f max %f\n", mnd, mxd);
-        // }
-
-        // a little tricky here, minimum distance -> maximum density
-        // if (mnd > radius * radius) maxDensity = 0.f;
-        // else maxDensity = evaluate_rbf(mnd, radius);
-
-        // if (mxd > radius * radius) minDensity = 0.f;
-        // else minDensity = evaluate_rbf(mxd, radius);
-        // gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 0, minDensity);
-        // gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 1, maxDensity);
-
-        // Keep track of the atomic sum of these two
-        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 0, 0); // ...
-        gprt::atomicAdd32f(record.minMaxVolume, addr * 4 + 1, particlesPerLeaf);
-
-        // Keep track of the atomic min/max of these two
-        gprt::atomicMin32f(record.minMaxVolume, addr * 4 + 2, attributeMin);
-        gprt::atomicMax32f(record.minMaxVolume, addr * 4 + 3, attributeMax);
-      }
+    
+    if (t >= 1e20) {
+		return cOld;
     }
-  }
+    return cOld + dir * t;
 }
 
-GPRT_COMPUTE_PROGRAM(ComputeMajorantGrid, (RayGenData, record), (1,1,1)) {
-  uint voxelID = DispatchThreadID.x;
-  float4 minmax = gprt::load<float4>(record.minMaxVolume, voxelID);
+GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
+  int2 pixelID = DispatchThreadID.xy;
+  float2 fragCoord = pixelID + float2(.5f, .5f);
+  float2 uv = (fragCoord) / float2(record.fbSize);
+  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+  SamplerState sampler = gprt::getDefaultSampler();
 
-  if (record.clampMaxCumulativeValue > 0.f)
-    // note, using xy here and leaving zw alone
-    minmax.xy = minmax.xy / record.clampMaxCumulativeValue;
-  
-  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-  uint32_t colormapWidth;
-  colormap.GetDimensions(colormapWidth);
-  
-  // if (voxelID < 20) printf("min %f max %f\n", minmax.x, minmax.y);
+  Texture2D imageTexture = gprt::getTexture2DHandle(record.imageTexture);
 
-  // if (voxelID < 20) printf("start %u stop %u\n", start, stop);
+  // get the neighborhood min / max from this frame's render
+  float4 center = imageTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
 
-  // transform data min max to colormap space
-  
-  
-  // note, using "x" and "y", which store density range
-  // note, using "z" and "w", which store attribute range
-  uint32_t start, stop;
-  if (!record.visualizeAttributes) {
-    start = uint32_t( floor( clamp(minmax.x, 0.f, 1.f) * colormapWidth)); 
-    stop  = uint32_t( ceil(clamp(minmax.y, 0.f, 1.f) * colormapWidth)); 
+  float4 pixelColor;
+  if (!record.disableTAA) {  
+    float3 minColor = rgb2ycocg(center.rgb);
+    float3 maxColor = rgb2ycocg(center.rgb);
+    for (int iy = -1; iy <= 1; ++iy)
+    {
+        for (int ix = -1; ix <= 1; ++ix)
+        {          
+          if (ix == 0 && iy == 0) continue;
+
+          float2 offsetUV = ((fragCoord + float2(ix, iy)) / record.fbSize.xy);
+          float3 color = imageTexture.SampleGrad(sampler, offsetUV, float2(0.f, 0.f), float2(0.f, 0.f)).rgb;
+          color = rgb2ycocg(color);
+          minColor = min(minColor, color);
+          maxColor = max(maxColor, color);
+        }
+    }
+
+    float4 old = gprt::load<float4>(record.taaPrevBuffer, fbOfs);
+    
+    // get last frame's pixel and clamp it to the neighborhood of this frame
+    old.rgb = ycocg2rgb(max(rgb2ycocg(old.rgb), minColor));
+    old.rgb = ycocg2rgb(min(rgb2ycocg(old.rgb), maxColor));
+
+    float lerpAmount = .2f;
+    pixelColor = lerp(old, center, lerpAmount);        
+    gprt::store(record.taaBuffer, fbOfs, pixelColor);
   } else {
-    start = uint32_t( floor( clamp(minmax.z, 0.f, 1.f) * colormapWidth)); 
-    stop  = uint32_t( ceil(clamp(minmax.w, 0.f, 1.f) * colormapWidth)); 
+    pixelColor = center;
   }
 
-  float majorant = 0.f;
-  for (uint32_t i = start; i < stop; ++i) {
-    majorant = max(majorant, pow(colormap[i].w, 3));
-  }
-  
-  gprt::store<float>(record.majorants, voxelID, majorant);
+  // Composite on top of everything else our user interface
+  Texture2D guiTexture = gprt::getTexture2DHandle(record.guiTexture);
+  float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
+  pixelColor = over(guiColor, float4(pixelColor.r, pixelColor.g, pixelColor.b, pixelColor.a));
+  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(pixelColor));
 }
 
 struct [raypayload] NullPayload{

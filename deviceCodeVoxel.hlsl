@@ -63,10 +63,7 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
 
     Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
     gprt::Buffer volume = record.volume;
-    gprt::Buffer majorants = record.majorants;
-    gprt::Buffer minMaxVolume = record.minMaxVolume;
     uint3 dims = record.volumeDimensions;
-    uint3 majorantDims = record.ddaDimensions;
     SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
 
     float4 albedo = float4(0.f, 0.f, 0.f, 0.f);
@@ -81,30 +78,11 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
       // Update current position
       float3 x = rayDesc.Origin + t * rayDesc.Direction;
 
-
-      // #define VIS_DDA
-      #ifdef VIS_DDA
-      
-      // Sample heterogeneous media
-      float3 nx = (x - lb) / (rt - lb);
-      int3 voxel = min(nx * majorantDims, majorantDims - 1);
-      float tmp = gprt::load<float>(majorants, voxel.x + voxel.y * majorantDims.x + voxel.z * majorantDims.x * majorantDims.y);
-      float4 xf = float4(tmp, tmp, tmp, .1);
-
-      #else
-
       // Sample heterogeneous media
       float3 nx = (x - lb) / (rt - lb);
       int3 voxel = min(nx * dims, dims - 1);
       float4 xf = gprt::load<float4>(volume, voxel.x + voxel.y * dims.x + voxel.z * dims.x * dims.y);
 
-      #endif
-      // if (all(pixelID == centerID) && !stop) {
-      //   printf("Sampled volume %lu %f %f %f %f\n", volume.x, xf.x, xf.y, xf.z, xf.w);
-      //   stop = true;
-      //   // finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
-      // }
-      
       if (lcg_randomf(rng) < xf.w / (majorantExtinction)) {
         albedo = float4(xf.rgb, 1.f);
         break;
@@ -129,24 +107,11 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
         if (ts >= shadowTExit) break;
         float3 x = shadowRay.Origin + ts * shadowRay.Direction;
         
-        // #define VIS_DDA
-        #ifdef VIS_DDA
-        // Sample heterogeneous media
-        float3 nx = (x - lb) / (rt - lb);
-        int3 voxel = min(nx * majorantDims, majorantDims - 1);
-        float tmp = gprt::load<float>(majorants, voxel.x + voxel.y * majorantDims.x + voxel.z * majorantDims.x * majorantDims.y);
-        float4 xf = float4(tmp, tmp, tmp, .1);
-        #else
         // Sample heterogeneous media
         float3 nx = (x - lb) / (rt - lb);
         int3 voxel = min(nx * dims, dims - 1);
         float4 xf = gprt::load<float4>(volume, voxel.x + voxel.y * dims.x + voxel.z * dims.x * dims.y);
-        #endif
-
         
-        // float3 nx = (x - lb) / (rt - lb);
-        // int3 voxel = min(nx * dims, dims - 1);
-        // float4 xf = gprt::load<float4>(volume, voxel.x + voxel.y * dims.x + voxel.z * dims.x * dims.y);
         if (lcg_randomf(rng) < xf.w / (majorantExtinction)) {
           visibility = 0.f;
           break;
@@ -160,26 +125,16 @@ GPRT_RAYGEN_PROGRAM(ParticleVoxelRayGen, (RayGenData, record)) {
     }
   }
 
-  // int pattern = (pixelID.x / 32) ^ (pixelID.y / 32);
-  float4 backgroundColor = float4(0.f, 0.f, 0.f, 0.f); //(pattern & 1) ? float4(.1f, .1f, .1f, 1.f) : float4(.2f, .2f, .2f, 1.f);
+  float4 backgroundColor = float4(0.f, 0.f, 0.f, 0.f);
 
   color = over(color, backgroundColor);
 
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
   float4 finalColor = (1.f / float(accumID)) * color + (float(accumID - 1) / float(accumID)) * prevColor;
+
+  if (all(pixelID == record.fbSize / 2)) printf("Prev %f %f %f %f\n",
+    prevColor.x, prevColor.y, prevColor.z, prevColor.w 
+  );
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
-
-  gprt::store(record.imageBuffer, fbOfs, gprt::make_bgra(finalColor));
-
-  // if (any(pixelID == centerID)) {
-  //   finalColor.rgb = float3(1.f, 1.f, 1.f) - finalColor.rgb;
-  // }
-
-
-  // Composite on top of everything else our user interface
-  Texture2D texture = gprt::getTexture2DHandle(record.guiTexture);
-  SamplerState sampler = gprt::getDefaultSampler();
-  float4 guiColor = texture.SampleGrad(sampler, screen, float2(0.f, 0.f), float2(0.f, 0.f));
-  finalColor = over(guiColor, float4(finalColor.r, finalColor.g, finalColor.b, finalColor.a));
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(finalColor));
+  gprt::store(record.imageBuffer, fbOfs, finalColor);
 }
