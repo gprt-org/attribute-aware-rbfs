@@ -55,7 +55,6 @@ set(LIBRARIES
   imgui_gradient::imgui_gradient 
   argparse 
 )
-set(COMPILE_DEFINITIONS)
 
 set(SOURCES
   hostCode.cpp

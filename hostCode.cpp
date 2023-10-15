@@ -70,7 +70,7 @@ extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 // const int2 fbSize = {1334, 574}; // teaser size
-const int2 fbSize = {512, 512}; // benchmark size
+const int2 fbSize = {1080, 1080}; // benchmark size
 // const int2 fbSize = {1920, 1080};
 
 // Initial camera parameters
@@ -166,25 +166,118 @@ int main(int argc, char *argv[]) {
     importPoints(pointsPath, particleData);
   } else {
     synthetic = true;
-    particleData.resize(500);
-    for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
-      float r = 1;
-      particleData[frame].resize(10 * 10 * 10);
-      for (int z = 0; z < 10; ++z) {
-        for (int y = 0; y < 10; ++y) {
-          for (int x = 0; x < 10; ++x) {
-            uint32_t i = x + y * 10 + z * 10 * 10;
-            float t1 = float(y) / float(10.f);
-            float t2 = (float(frame) / float(particleData.size()));
 
-            particleData[frame][i].second =
-                float4((sin(t2 * 2.f * 3.14) + 1.0f) * ((x - 5.f) / 10.f),
-                       (sin(t2 * 2.f * 3.14) + 1.0f) * ((y - 5.f) / 10.f),
-                       (sin(t2 * 2.f * 3.14) + 1.0f) * ((z - 5.f) / 10.f), t1);
-          }
-        }
+    // particleData.resize(240 + 60 + 60 + 60 + 60);
+    // for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+    //   particleData[frame].resize(3);
+    //   for (int i = 0; i < particleData[frame].size(); ++i) {
+    //     float t1 = float(i) / float(particleData[frame].size());
+
+    //     float t2 = std::min(float(frame) / float(240), 1.f);
+    //     float t3 = (1.0-cos(std::min(std::max(float(int(frame) - 240), 0.f) / float(60), 1.f) * 3.1415926f)) * .5;
+    //     float t4 = (1.0-cos(std::min(std::max(float(int(frame) - (240 + 60)), 0.f) / float(60), 1.f) * 3.1415926f)) * .5;
+    //     float t5 = (1.0-cos(std::min(std::max(float(int(frame) - (240 + 60 + 60)), 0.f) / float(60), 1.f) * 3.1415926f)) * .5;
+    //     float t6 = (1.0-cos(std::min(std::max(float(int(frame) - (240 + 60 + 60 + 60)), 0.f) / float(60), 1.f) * 3.1415926f)) * .5;
+
+    //     particleData[frame][i].second =
+    //         float4( (cos(t2 * 2.f * 3.14) + 1.0f) * (.25f * (1.0 - t3) + t3 * .25 * (t1 <= .4f ? 0.0 : 1.0) * (1.0 - t4) + t4 * .25 * (t1 > 0.0 ? 0.0 : 1.0) * (1.0 - t5) + t5 * .25 * ((t1 == 0.f || t1 > .6) ? 0.0 : 1.0) * (1.0 - t6) + t6 * .25) * sin(t1 * 2.f * 3.14f),
+    //                 (cos(t2 * 2.f * 3.14) + 1.0f) * (.25f * (1.0 - t3) + t3 * .25 * (t1 <= .4f ? 0.0 : 1.0) * (1.0 - t4) + t4 * .25 * (t1 > 0.0 ? 0.0 : 1.0) * (1.0 - t5) + t5 * .25 * ((t1 == 0.f || t1 > .6) ? 0.0 : 1.0) * (1.0 - t6) + t6 * .25) * cos(t1 * 2.f * 3.14f),
+    //                 0.0f, t1);
+    //   }
+    // }
+
+    // // good for animating radius
+    // particleData.resize(60 + 240 + 60);
+    // for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+    //   particleData[frame].resize(3);
+    //   for (int i = 0; i < particleData[frame].size(); ++i) {
+    //     float t1 = float(i) / float(particleData[frame].size());
+    //     float t2 = std::min(float(frame) / float(60), 1.f);
+    //     float t3 = std::min(std::max(float(int(frame) - 60), 0.f) / float(240), 1.f);
+    //     float t4 = std::min(std::max(float(int(frame) - (60 + 240)), 0.f) / float(60), 1.f);
+        
+    //     float start = (-cos(t2 * 3.14) + 1.0) * .5; // 0 -> 1
+        
+    //     float stop = (cos(t4 * 3.14) + 1.0) * .5; // 1 -> 0
+
+    //     particleData[frame][i].second =
+    //         float4( (cos(1.f * 2.f * 3.14) + 1.0f) * .25f * sin(t1 * 2.f * 3.14f),
+    //                 (cos(1.f * 2.f * 3.14) + 1.0f) * .25f * cos(t1 * 2.f * 3.14f),
+    //                 0.0f, 
+    //                 (1.0 - start) * .1 + // turning off...
+    //                 stop * start * (((sin((t3) * 3.14 * 4.f) + 1.f) * .5f) + .1) // turning on, then off...
+    //                 + stop * .1f
+    //                 );
+    //   }
+    // }
+
+    // Good for animating weights
+    // particleData.resize(60 + 240 + 60);
+    // for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+    //   particleData[frame].resize(3);
+    //   for (int i = 0; i < particleData[frame].size(); ++i) {
+    //     float t1 = float(i) / float(particleData[frame].size());
+    //     float t2 = std::min(float(frame) / float(60), 1.f);
+    //     float t3 = std::min(std::max(float(int(frame) - 60), 0.f) / float(240), 1.f);
+    //     float t4 = std::min(std::max(float(int(frame) - (60 + 240)), 0.f) / float(60), 1.f);
+        
+    //     float start = (-cos(t2 * 3.14) + 1.0) * .5; // 0 -> 1
+    //     float stop = (cos(t4 * 3.14) + 1.0) * .5; // 1 -> 0
+
+    //     // (initialParticleRadius * (1.0 - startt)) + // turning off...
+    // //              + initialParticleRadius * startt * stopt * ((((sin((t3) * 3.14 * 2.f) + 1.f) * .5f)*1.5 + .3)) // turning on, then off...
+    // //             + (1.0 - stopt) * initialParticleRadius
+
+    //     particleData[frame][i].second =
+    //         float4( (cos(1.f * 2.f * 3.14) + 1.0f) * .25f * sin(t1 * 2.f * 3.14f),
+    //                 (cos(1.f * 2.f * 3.14) + 1.0f) * .25f * cos(t1 * 2.f * 3.14f),
+    //                 0.0f, 
+    //                 (1.0 - start) // turning off...
+    //                 + start * stop * (((sin(t3 * 3.14f * 2.f + t1 * (3.14f * 2.f)) + 1.f) * .5f)*.9 + .1) // turning on, then off...
+    //                 + (1.0 - stop)
+    //                 );
+    //   }
+    // }
+
+    // good for animating distance
+    particleData.resize(60 + 60 + 60 + 60 /*+ 60 + 60*/);
+    for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+      particleData[frame].resize(3);
+      for (int i = 0; i < particleData[frame].size(); ++i) {
+        float t1 = float(i) / float(particleData[frame].size());
+        float t2 = std::min(float(frame) / float(240), 1.f);
+
+        float t3 = (1.0-cos(std::min(std::max(float(int(frame) - 60), 0.f) / float(60), 1.f) * 3.1415926f)) * .5f;
+        float t4 = (1.0-cos(std::min(std::max(float(int(frame) - (60 + 60)), 0.f) / float(60), 1.f) * 3.1415926f)) * .5f;
+        float t5 = (1.0-cos(std::min(std::max(float(int(frame) - (60 + 60 + 60)), 0.f) / float(60), 1.f) * 3.1415926f)) * .5;
+        // float t6 = (1.0-cos(std::min(std::max(float(int(frame) - (240 + 60 + 60 + 60)), 0.f) / float(60), 1.f) * 3.1415926f)) * .5;
+
+        particleData[frame][i].second =
+            float4( (cos(1.f * 2.f * 3.14) + 1.0f) * (.25f * (1.0 - t3) + t3 * .5f * (1.0 - t4) + t4 * .0f * (1.f - t5) + .25 * t5) * sin(t1 * 2.f * 3.14f),
+                    (cos(1.f * 2.f * 3.14) + 1.0f) * (.25f * (1.0 - t3) + t3 * .5f * (1.0 - t4) + t4 * .0f * (1.f - t5) + .25 * t5) * cos(t1 * 2.f * 3.14f),
+                    0.0f, t1);
       }
     }
+
+    // particleData.resize(500);
+    // for (uint32_t frame = 0; frame < particleData.size(); ++frame) {
+    //   float r = 1;
+    //   particleData[frame].resize(10 * 10 * 10);
+    //   for (int z = 0; z < 10; ++z) {
+    //     for (int y = 0; y < 10; ++y) {
+    //       for (int x = 0; x < 10; ++x) {
+    //         uint32_t i = x + y * 10 + z * 10 * 10;
+    //         float t1 = float(y) / float(10.f);
+    //         float t2 = (float(frame) / float(particleData.size()));
+
+    //         particleData[frame][i].second =
+    //             float4((sin(t2 * 2.f * 3.14) + 1.0f) * ((x - 5.f) / 10.f),
+    //                    (sin(t2 * 2.f * 3.14) + 1.0f) * ((y - 5.f) / 10.f),
+    //                    (sin(t2 * 2.f * 3.14) + 1.0f) * ((z - 5.f) / 10.f), t1);
+    //       }
+    //     }
+    //   }
+    // }
   }
 
   size_t totalParticles = 0;
@@ -241,8 +334,10 @@ int main(int argc, char *argv[]) {
     lookFrom = aabb[1];
 
     if (synthetic) {
+      cosFovy = 0.1f;
       lookAt = {0.f, 0.f, 0.f};
-      lookFrom = {-3.f, 3.f, 3.f};
+      // lookFrom = {-3.f, 3.f, 3.f};
+      lookFrom = {0.f, 0.f, -30.f};
     }
   }
 
@@ -360,6 +455,8 @@ int main(int argc, char *argv[]) {
 
   auto frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
+  auto frameBufferNoGui =
+      gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   auto accumBuffer =
       gprtDeviceBufferCreate<float4>(context, fbSize.x * fbSize.y);
   auto imageBuffer =
@@ -424,6 +521,7 @@ int main(int argc, char *argv[]) {
                         GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP);
 
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
+  raygenData.frameBufferNoGui = gprtBufferGetHandle(frameBufferNoGui);
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
   raygenData.taaBuffer = gprtBufferGetHandle(taaBuffer);
@@ -599,12 +697,14 @@ int main(int argc, char *argv[]) {
   float diagonal = length(aabb[1] - aabb[0]);
 
   int previousParticleFrame = -1;
-  float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
+  float previousParticleRadius = ((synthetic) ? .92830f : .01f * diagonal) ;
   float radiusArg = program.get<float>("--radius");
-  bool playAnimation = true;
+  bool playAnimation = false;
   static bool disableBlueNoise = false;
   static bool disableTAA = true;
   std::stringstream frameStats;
+
+  float initialParticleRadius = previousParticleRadius;
   do {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
@@ -612,24 +712,49 @@ int main(int argc, char *argv[]) {
     static int particleFrame = 0;
     ini.get_int32("particleFrame", particleFrame);
 
+    static float rbfRadius = previousParticleRadius;
+    ini.get_float("rbfRadius", rbfRadius);
+
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
     if (ImGui::Button("Play Animation")) {
       playAnimation = true;
+      accumID = 1;
     }
     if (ImGui::Button("Pause Animation")) {
       playAnimation = false;
     }
 
-    if (playAnimation) {
-      particleFrame++;
+    // float t2 = std::min(float(particleFrame) / float(60), 1.f);
+    // float t3 = std::min(std::max(float(int(particleFrame) - 60), 0.f) / float(240), 1.f);
+    // float t4 = std::min(std::max(float(int(particleFrame) - (60 + 240)), 0.f) / float(60), 1.f);
+    // float startt = (-cos(t2 * 3.14) + 1.0) * .5; // 0 -> 1
+    // float stopt = (cos(t4 * 3.14) + 1.0) * .5; // 1 -> 0
+
+    // rbfRadius = (initialParticleRadius * (1.0 - startt)) + // turning off...
+    //              + initialParticleRadius * startt * stopt * ((((sin((t3) * 3.14 * 2.f) + 1.f) * .5f)*1.5 + .3)) // turning on, then off...
+    //             + (1.0 - stopt) * initialParticleRadius;
+
+    if (playAnimation) {                  
+      if (accumID > 1024) {
+        accumID = 1;
+        particleFrame++;
+
+        size_t n = 3;
+        std::string digit = std::to_string(particleFrame);
+        int precision = n - std::min(n, digit.size());
+        digit.insert(0, precision, '0');
+        gprtBufferSaveImage(frameBufferNoGui, fbSize.x, fbSize.y, ("distance" + digit + ".png").c_str());
+      }
+
+      gprtSetWindowTitle(context, (std::to_string(accumID) + " / 1024").c_str());
+
       if (particleFrame >= particles.size())
         particleFrame = 1;
-      accumID = 1;
+
     }
 
-    static float rbfRadius = previousParticleRadius;
-    ini.get_float("rbfRadius", rbfRadius);
+    
     // cmdline overrides ini!
     if (rbfRadius != previousParticleRadius && radiusArg > 0.f)
       rbfRadius = radiusArg;
@@ -918,7 +1043,7 @@ int main(int argc, char *argv[]) {
       accumID = 1;
     }
 
-    static float sigma = 3.f;
+    static float sigma = 4.f;
     static float clampMaxCumulativeValue = 1.f;
     static float unit = previousParticleRadius * .1f;
     static float jitter = 1.f;
@@ -952,7 +1077,7 @@ int main(int argc, char *argv[]) {
     unit = std::max(unit, .0001f);
     static float azimuth = 0.f;
     static float elevation = 0.f;
-    static float ambient = .5f;
+    static float ambient = 1.f;
     ini.get_float("light.azimuth", azimuth);
     ini.get_float("light.elevation", elevation);
     ini.get_float("light.ambient", ambient);
@@ -988,10 +1113,10 @@ int main(int argc, char *argv[]) {
     double accelBuildTime = 0.0;
     if (previousParticleFrame != particleFrame || forceRebuild) {
 
-      if (synthetic) {
-        azimuth = sin(gprtGetTime(context)) * .5 + .5;
-        elevation = cos(gprtGetTime(context));
-      }
+      // if (synthetic) {
+      //   azimuth = sin(gprtGetTime(context)) * .5 + .5;
+      //   elevation = cos(gprtGetTime(context));
+      // }
 
       particleRecord.numParticles = particles[particleFrame].size();
       particleRecord.rbfRadius = previousParticleRadius;

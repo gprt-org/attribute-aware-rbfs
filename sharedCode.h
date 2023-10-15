@@ -56,6 +56,7 @@ struct RayGenData {
   alignas(16) gprt::Texture guiTexture;
   alignas(16) gprt::Texture imageTexture;
   alignas(16) gprt::Buffer frameBuffer;
+  alignas(16) gprt::Buffer frameBufferNoGui;
   alignas(16) gprt::Buffer imageBuffer;
   alignas(16) gprt::Buffer taaBuffer;
   alignas(16) gprt::Buffer taaPrevBuffer;

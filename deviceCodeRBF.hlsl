@@ -258,7 +258,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   Texture2D stbn = gprt::getTexture2DHandle(stbnHandle);
 
   if (!record.disableBlueNoise) {
-    random = stbn[int2(pixelID.x % 128,pixelID.y % 128)].rgb;
+    random = stbn[int2((pixelID.x + 32 * (frameID / 64)) % 128, (pixelID.y + 32 * (frameID / (64 * 4))) % 128)].rgb;
     tracker.doMarching = true;
   }  
   else {
@@ -334,7 +334,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     }
   }
 
-  float4 backgroundColor = float4(0.f, 0.f, 0.f, 1.f);
+  float4 backgroundColor = float4(1.f, 1.f, 1.f, 0.f);
 
   color = over(color, backgroundColor);
 
@@ -385,7 +385,6 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
     gprt::ignoreHit();
     return;
   }
-  
   payload.count += 1;
   payload.density += hit_particle.density * pow(color.w, 3);
 

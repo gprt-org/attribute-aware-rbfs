@@ -286,6 +286,8 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
   }
 
   // Composite on top of everything else our user interface
+  gprt::store(record.frameBufferNoGui, fbOfs, gprt::make_bgra(pixelColor));
+
   Texture2D guiTexture = gprt::getTexture2DHandle(record.guiTexture);
   float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
   pixelColor = over(guiColor, float4(pixelColor.r, pixelColor.g, pixelColor.b, pixelColor.a));
