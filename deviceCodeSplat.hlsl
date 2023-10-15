@@ -24,6 +24,8 @@
 
 #include "rng.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 // https://www.sci.utah.edu/~wald/Publications/2019/rtgems/ParticleSplatting.pdf
 
 struct ParticleSample {
@@ -104,11 +106,11 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
       if (rayDesc.TMax > tenter)
       {
-        TraceRay(world,         // the tree
-                RAY_FLAG_NONE,   // ray flags
+        TraceRay(world,                  // the tree
+                RAY_FLAG_NONE,           // ray flags
                 0xff,                    // instance inclusion mask
                 1,                       // ray type
-                gprt::getNumRayTypes(),  // number of ray types
+                pc.rayTypeCount,         // number of ray types
                 0,                       // miss type
                 rayDesc,                 // the ray to trace
                 payload                  // the payload IO

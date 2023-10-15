@@ -24,6 +24,8 @@
 
 #include "rng.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1024, 1, 1)) {
   uint32_t clusterID = DispatchThreadID.x; 
   if (clusterID >= record.numAABBs) return;

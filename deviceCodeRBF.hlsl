@@ -24,6 +24,8 @@
 
 #include "rng.h"
 
+[[vk::push_constant]] PushConstants pc;
+
 struct RBFAttribute {
   float density;
   float attribute;
@@ -108,7 +110,7 @@ class ParticleTracker {
               RAY_FLAG_NONE,           // ray flags
               0xff,                    // instance inclusion mask
               0,                       // ray type
-              gprt::getNumRayTypes(),  // number of ray types
+              pc.rayTypeCount,         // number of ray types
               0,                       // miss type
               pointDesc,               // the ray to trace
               payload                  // the payload IO
@@ -184,7 +186,7 @@ class ParticleTracker {
               RAY_FLAG_NONE,           // ray flags
               0xff,                    // instance inclusion mask
               0,                       // ray type
-              gprt::getNumRayTypes(),  // number of ray types
+              pc.rayTypeCount,         // number of ray types
               0,                       // miss type
               pointDesc,               // the ray to trace
               payload                  // the payload IO

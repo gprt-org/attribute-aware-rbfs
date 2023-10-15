@@ -23,29 +23,28 @@
 // This program sets up a single geometric object, a mesh for a cube, and
 // its acceleration structure, then ray traces it.
 
-// public GPRT API
+// public "General Purpose Raytracing Toolkit" API
 #include <gprt.h>
 
-// stb
+// An example particle importer
+#include "importers/import_points.h"
+
+// stb for image loading and storing
 #define STB_IMAGE_STATIC
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
-// our shared data structures between host and device
+// Our shared data structures between host and device
 #include "sharedCode.h"
 
-#ifdef HEADLESS
-#include "ColorMap.h"
-#include "generateFibonacciSphere.h"
-#else
+/* imgui for a small user interface */
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
-#endif
 
 #include <fstream>
+#include <iostream>
 
 #include "IniFile.h"
-#include "importers/import_points.h"
 #include <argparse/argparse.hpp>
 
 // For parallel sorting of points along a hilbert curve
@@ -54,24 +53,13 @@
 #include <algorithm>
 #include <execution>
 
-#define LOG(message)                                                           \
-  std::cout << GPRT_TERMINAL_BLUE;                                             \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-#define LOG_OK(message)                                                        \
-  std::cout << GPRT_TERMINAL_LIGHT_BLUE;                                       \
-  std::cout << "#gprt.sample(main): " << message << std::endl;                 \
-  std::cout << GPRT_TERMINAL_DEFAULT;
-
 extern GPRTProgram deviceCodeCommon;
 extern GPRTProgram deviceCodeSplat;
 extern GPRTProgram deviceCodeRBF;
 extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
-// const int2 fbSize = {1334, 574}; // teaser size
-const int2 fbSize = {512, 512}; // benchmark size
-// const int2 fbSize = {1920, 1080};
+const int2 fbSize = {1024, 1024};
 
 // Initial camera parameters
 float3 lookFrom = {3.5f, 3.5f, 3.5f};
@@ -79,10 +67,7 @@ float3 lookAt = {0.f, 0.f, 0.f};
 float3 lookUp = {0.f, -1.f, 0.f};
 float cosFovy = 0.66f;
 
-// uint32_t particlesPerLeaf = 16;
 uint32_t particlesPerLeaf = 1;
-// float rbfRadius = .01f; //3.f;
-// float rbfRadius = 3.f; // 3.f;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
 
@@ -121,7 +106,6 @@ void pretty_bytes(uint32_t bytes) {
     printf("%.1f %s", count, suffixes[s]);
 }
 
-#include <iostream>
 int main(int argc, char *argv[]) {
   argparse::ArgumentParser program("RT Point Clouds");
 
@@ -314,9 +298,7 @@ int main(int argc, char *argv[]) {
     }
   }
 
-#ifndef HEADLESS
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
-#endif
   gprtRequestRayTypeCount(2);
 
   int32_t GPU = 0;
@@ -605,6 +587,9 @@ int main(int argc, char *argv[]) {
   static bool disableBlueNoise = false;
   static bool disableTAA = true;
   std::stringstream frameStats;
+
+  PushConstants constants;
+  constants.rayTypeCount = 2;
   do {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
@@ -1156,13 +1141,13 @@ int main(int argc, char *argv[]) {
 
     switch (mode) {
     case 0:
-      gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y);
+      gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y, constants);
       break;
     case 1:
-      gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y);
+      gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y, constants);
       break;
     case 2:
-      gprtRayGenLaunch2D(context, ParticleVoxelRayGen, fbSize.x, fbSize.y);
+      gprtRayGenLaunch2D(context, ParticleVoxelRayGen, fbSize.x, fbSize.y, constants);
       break;
     default:
       break;
@@ -1196,8 +1181,6 @@ int main(int argc, char *argv[]) {
     ini.clear();
   } while (!gprtWindowShouldClose(context));
 
-  LOG("cleaning up ...");
-
   gprtBufferDestroy(particleBuffer);
   gprtBufferDestroy(aabbBuffer);
   gprtBufferDestroy(frameBuffer);
@@ -1214,6 +1197,4 @@ int main(int argc, char *argv[]) {
   gprtModuleDestroy(moduleRBF);
   gprtModuleDestroy(moduleVoxel);
   gprtContextDestroy(context);
-
-  LOG_OK("seems all went OK; app is done, this should be the last output ...");
 }

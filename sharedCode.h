@@ -29,104 +29,109 @@
 #define FLOAT_EPSILON 1.19209290e-7F
 #define DOUBLE_EPSILON 2.2204460492503131e-16
 
+/* Constants available to all programs */
+struct PushConstants {
+  int rayTypeCount;
+};
+
 /* variables available to all programs */
 
 struct ParticleData {
-  alignas(4) uint32_t particlesPerLeaf;
-  alignas(4) uint32_t numParticles;
-  alignas(4) float rbfRadius;
-  alignas(4) float clampMaxCumulativeValue;
-  alignas(4) float sigma;
-  alignas(4) float power;
+  uint32_t particlesPerLeaf;
+  uint32_t numParticles;
+  float rbfRadius;
+  float clampMaxCumulativeValue;
+  float sigma;
+  float power;
 
   // A switch to visualize either RBF density or per-particle attributes
-  alignas(4) int visualizeAttributes;
-  alignas(16) gprt::Texture colormap;
-  alignas(16) gprt::Texture radiusmap;
-  alignas(16) gprt::Sampler colormapSampler;
+  int visualizeAttributes;
+  gprt::Texture colormap;
+  gprt::Texture radiusmap;
+  gprt::Sampler colormapSampler;
 
-  alignas(16) gprt::Buffer particles;
-  alignas(16) gprt::Buffer aabbs;
-  alignas(4) int numAABBs;
+  gprt::Buffer particles;
+  gprt::Buffer aabbs;
+  int numAABBs;
 
-  alignas(4) int disableColorCorrection;
+  int disableColorCorrection;
 };
 
 struct RayGenData {
-  alignas(16) gprt::Texture guiTexture;
-  alignas(16) gprt::Texture imageTexture;
-  alignas(16) gprt::Buffer frameBuffer;
-  alignas(16) gprt::Buffer imageBuffer;
-  alignas(16) gprt::Buffer taaBuffer;
-  alignas(16) gprt::Buffer taaPrevBuffer;
-  alignas(16) gprt::Buffer accumBuffer;
-  alignas(16) gprt::Buffer stbnBuffer;
-  alignas(8) int2 fbSize;
-  alignas(4) uint32_t accumID;
-  alignas(4) uint32_t frameID;
+  gprt::Texture guiTexture;
+  gprt::Texture imageTexture;
+  gprt::Buffer frameBuffer;
+  gprt::Buffer imageBuffer;
+  gprt::Buffer taaBuffer;
+  gprt::Buffer taaPrevBuffer;
+  gprt::Buffer accumBuffer;
+  gprt::Buffer stbnBuffer;
+  int2 fbSize;
+  uint32_t accumID;
+  uint32_t frameID;
 
-  alignas(16) gprt::Accel world;
-  alignas(16) float3 globalAABBMin;
-  alignas(16) float3 globalAABBMax;
-  alignas(4) float rbfRadius;
-  alignas(4) float clampMaxCumulativeValue;
-  alignas(4) float sigma;
-  alignas(4) float power;
-  alignas(16) gprt::Buffer particles;
-  alignas(4) uint32_t particlesPerLeaf;
-  alignas(4) uint32_t numParticles;
+  gprt::Accel world;
+  float3 globalAABBMin;
+  float3 globalAABBMax;
+  float rbfRadius;
+  float clampMaxCumulativeValue;
+  float sigma;
+  float power;
+  gprt::Buffer particles;
+  uint32_t particlesPerLeaf;
+  uint32_t numParticles;
 
   // colormap for visualization
-  alignas(16) gprt::Texture colormap;
-  alignas(16) gprt::Texture radiusmap;
-  alignas(16) gprt::Texture densitymap;
-  alignas(16) gprt::Sampler colormapSampler;
+  gprt::Texture colormap;
+  gprt::Texture radiusmap;
+  gprt::Texture densitymap;
+  gprt::Sampler colormapSampler;
 
   // In the case that we end up rasterizing our particles
   // into a grid.
-  alignas(16) gprt::Buffer volume;
-  alignas(16) gprt::Buffer volumeCount;
-  alignas(16) uint3 volumeDimensions;
+  gprt::Buffer volume;
+  gprt::Buffer volumeCount;
+  uint3 volumeDimensions;
 
   // For controling the relative density of delta tracking
-  alignas(4) float unit;
+  float unit;
 
   // How much to jitter ray marching to reduce step artifacts
-  alignas(4) float jitter;
+  float jitter;
 
   // A switch to visualize either RBF density or per-particle attributes
-  alignas(4) int visualizeAttributes;
+  int visualizeAttributes;
 
   // If true, renders the time that it takes to render the given image
-  alignas(4) int showHeatmap;
+  int showHeatmap;
 
-  alignas(4) int disableColorCorrection;
+  int disableColorCorrection;
 
-  alignas(4) int disableBlueNoise;
+  int disableBlueNoise;
 
-  alignas(4) int disableTAA;
+  int disableTAA;
 
   struct {
-    alignas(4) float azimuth;
-    alignas(4) float elevation;
-    alignas(4) float ambient;
+     float azimuth;
+     float elevation;
+     float ambient;
   } light;
 
   struct {
-    alignas(16) float3 pos;
-    alignas(16) float3 dir_00;
-    alignas(16) float3 dir_du;
-    alignas(16) float3 dir_dv;
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
   } camera;
 
-  alignas(4) float exposure;
-  alignas(4) float gamma;
+  float exposure;
+  float gamma;
 };
 
 /* variables for the miss program */
 struct MissProgData {
-  alignas(16) float3 color0;
-  alignas(16) float3 color1;
+  float3 color0;
+  float3 color1;
 };
 
 #ifdef GPRT_DEVICE
