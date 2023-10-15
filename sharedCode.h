@@ -32,6 +32,43 @@
 /* Constants available to all programs */
 struct PushConstants {
   int rayTypeCount;
+  uint32_t accumID;
+  uint32_t frameID;
+
+  // parameters for light controls
+  struct {
+    float azimuth;
+    float elevation;
+    float ambient;
+  } light;
+
+  // parameters for camera
+  struct {
+    float3 pos;
+    float3 dir_00;
+    float3 dir_du;
+    float3 dir_dv;
+  } camera;
+
+  float exposure;
+  float gamma;
+  
+  // a global scale for the particles
+  float rbfRadius;
+
+  int disableBlueNoise;
+  int disableTAA;
+
+  // For controling the relative density of delta tracking
+  float unit;
+
+  // A switch to visualize either RBF density or per-particle attributes
+  int visualizeAttributes;
+
+  float clampMaxCumulativeValue;
+
+  // Acceleration structure containing our particles
+  gprt::Accel world;
 };
 
 /* variables available to all programs */
@@ -39,13 +76,7 @@ struct PushConstants {
 struct ParticleData {
   uint32_t particlesPerLeaf;
   uint32_t numParticles;
-  float rbfRadius;
-  float clampMaxCumulativeValue;
-  float sigma;
-  float power;
 
-  // A switch to visualize either RBF density or per-particle attributes
-  int visualizeAttributes;
   gprt::Texture colormap;
   gprt::Texture radiusmap;
   gprt::Sampler colormapSampler;
@@ -53,8 +84,6 @@ struct ParticleData {
   gprt::Buffer particles;
   gprt::Buffer aabbs;
   int numAABBs;
-
-  int disableColorCorrection;
 };
 
 struct RayGenData {
@@ -67,17 +96,10 @@ struct RayGenData {
   gprt::Buffer taaBuffer;
   gprt::Buffer taaPrevBuffer;
   gprt::Buffer accumBuffer;
-  int2 fbSize;
-  uint32_t accumID;
-  uint32_t frameID;
+  int2 fbSize;  
 
-  gprt::Accel world;
   float3 globalAABBMin;
   float3 globalAABBMax;
-  float rbfRadius;
-  float clampMaxCumulativeValue;
-  float sigma;
-  float power;
   gprt::Buffer particles;
   uint32_t particlesPerLeaf;
   uint32_t numParticles;
@@ -87,53 +109,11 @@ struct RayGenData {
   gprt::Texture radiusmap;
   gprt::Texture densitymap;
   gprt::Sampler colormapSampler;
-
-  // In the case that we end up rasterizing our particles
-  // into a grid.
-  gprt::Buffer volume;
-  gprt::Buffer volumeCount;
-  uint3 volumeDimensions;
-
-  // For controling the relative density of delta tracking
-  float unit;
-
-  // How much to jitter ray marching to reduce step artifacts
-  float jitter;
-
-  // A switch to visualize either RBF density or per-particle attributes
-  int visualizeAttributes;
-
-  // If true, renders the time that it takes to render the given image
-  int showHeatmap;
-
-  int disableColorCorrection;
-
-  int disableBlueNoise;
-  int disableBlueNoise2;
-
-  int disableTAA;
-
-  struct {
-     float azimuth;
-     float elevation;
-     float ambient;
-  } light;
-
-  struct {
-    float3 pos;
-    float3 dir_00;
-    float3 dir_du;
-    float3 dir_dv;
-  } camera;
-
-  float exposure;
-  float gamma;
 };
 
-/* variables for the miss program */
+/* variables for the miss program. (currently unused) */
 struct MissProgData {
-  float3 color0;
-  float3 color1;
+  int tmp;
 };
 
 #ifdef GPRT_DEVICE

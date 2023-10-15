@@ -44,7 +44,6 @@
 #include <fstream>
 #include <iostream>
 
-#include "IniFile.h"
 #include <argparse/argparse.hpp>
 
 // For parallel sorting of points along a hilbert curve
@@ -135,10 +134,6 @@ int main(int argc, char *argv[]) {
     std::cerr << program;
     std::exit(1);
   }
-
-  IniFile ini("viewer.ini");
-  if (ini.good())
-    std::cout << "Found viewer.ini\n";
 
   std::vector<std::vector<std::pair<uint64_t, float4>>> particleData;
 
@@ -382,14 +377,17 @@ int main(int argc, char *argv[]) {
       gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
                         GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP);
 
+  PushConstants constants;
+  constants.rayTypeCount = 2;
+  constants.exposure = 1.f;
+  constants.gamma = 1.0f;
+
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
   raygenData.taaBuffer = gprtBufferGetHandle(taaBuffer);
   raygenData.taaPrevBuffer = gprtBufferGetHandle(taaPrevBuffer);
   raygenData.stbnTexture = gprtTextureGetHandle(stbnTexture);
-  raygenData.exposure = 1.f;
-  raygenData.gamma = 1.0f;
   raygenData.colormap = gprtTextureGetHandle(colormap);
   raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
   raygenData.densitymap = gprtTextureGetHandle(densitymap);
@@ -398,21 +396,11 @@ int main(int argc, char *argv[]) {
   raygenData.imageTexture = gprtTextureGetHandle(imageTexture);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
-  raygenData.disableColorCorrection = false;
-  raygenData.disableBlueNoise = false;
-  raygenData.disableTAA = true;
   // raygenData.rbfRadius = rbfRadius;
 
-  MissProgData *missData = gprtMissGetParameters(miss);
-  ini.get_vec3f("color0", missData->color0.x, missData->color0.y,
-                missData->color0.z, 0.1f, 0.1f, 0.1f);
-  ini.get_vec3f("color1", missData->color1.x, missData->color1.y,
-                missData->color1.z, 0.0f, 0.0f, 0.0f);
-
-  ini.get_uint32("particlesPerLeaf", particlesPerLeaf, 1);
   std::cout << "Particles per leaf " << particlesPerLeaf << std::endl;
   uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
-  // overwrites ini!
+  
   if (particlesPerLeafArg > 0)
     particlesPerLeaf = particlesPerLeafArg;
 
@@ -438,7 +426,6 @@ int main(int argc, char *argv[]) {
   particleRecord.colormap = gprtTextureGetHandle(colormap);
   particleRecord.radiusmap = gprtTextureGetHandle(radiusmap);
   particleRecord.colormapSampler = gprtSamplerGetHandle(sampler);
-  particleRecord.disableColorCorrection = false;
 
   // also assign particles to raygen
   raygenData.particles = gprtBufferGetHandle(particleBuffer);
@@ -459,9 +446,6 @@ int main(int argc, char *argv[]) {
   gprtBuildShaderBindingTable(context);
 
   std::string cmMarksStr, rmMarksStr, dmMarksStr;
-  ini.get_string("colormap", cmMarksStr);
-  ini.get_string("radiusmap", rmMarksStr);
-  ini.get_string("densitymap", dmMarksStr);
 
   auto getMarks = [](std::string markStr) {
     std::vector<std::pair<float, float4>> marks;
@@ -526,8 +510,8 @@ int main(int argc, char *argv[]) {
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
-  uint32_t accumID = 1;
-  uint32_t frameID = 1;
+  constants.accumID = 1;
+  constants.frameID = 1;
 
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
@@ -538,18 +522,22 @@ int main(int argc, char *argv[]) {
   float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool playAnimation = true;
-  static bool disableBlueNoise = true;
-  static bool disableTAA = true;
+  constants.disableBlueNoise = false;
+  constants.disableTAA = false;
   std::stringstream frameStats;
 
-  PushConstants constants;
-  constants.rayTypeCount = 2;
+  constants.exposure = 1.0f;
+  constants.gamma = 1.0f;
+  constants.rbfRadius = previousParticleRadius;
+  constants.clampMaxCumulativeValue = 1.f;
+  constants.unit = previousParticleRadius * .1f;
+  constants.visualizeAttributes = true;
+
   do {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
 
     static int particleFrame = 0;
-    ini.get_int32("particleFrame", particleFrame);
 
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
 
@@ -564,16 +552,13 @@ int main(int argc, char *argv[]) {
       particleFrame++;
       if (particleFrame >= particles.size())
         particleFrame = 1;
-      accumID = 1;
+      constants.accumID = 1;
     }
 
-    static float rbfRadius = previousParticleRadius;
-    ini.get_float("rbfRadius", rbfRadius);
-    // cmdline overrides ini!
-    if (rbfRadius != previousParticleRadius && radiusArg > 0.f)
-      rbfRadius = radiusArg;
+    if (constants.rbfRadius != previousParticleRadius && radiusArg > 0.f)
+      constants.rbfRadius = radiusArg;
 
-    ImGui::DragFloat("Particle Radius", &rbfRadius, 0.0001f * diagonal,
+    ImGui::DragFloat("Particle Radius", &constants.rbfRadius, 0.0001f * diagonal,
                      .0001f * diagonal, 1.f * diagonal, "%.5f");
 
     auto make_8bit = [](const float f) -> uint32_t {
@@ -592,7 +577,7 @@ int main(int argc, char *argv[]) {
         ptr[i * 4 + 3] = make_8bit(result.w);
       }
 
-      accumID = 1;
+      constants.accumID = 1;
       gprtTextureUnmap(colormap);
     }
 
@@ -608,7 +593,7 @@ int main(int argc, char *argv[]) {
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
-      accumID = 1;
+      constants.accumID = 1;
       gprtTextureUnmap(radiusmap);
     }
 
@@ -624,47 +609,29 @@ int main(int argc, char *argv[]) {
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
-      accumID = 1;
+      constants.accumID = 1;
       gprtTextureUnmap(densitymap);
     }
 
-    static bool disableColorCorrection = false;
-    ini.get_bool("disableColorCorrection", disableColorCorrection);
-    if (ImGui::Checkbox("Disable color correction", &disableColorCorrection)) {
-      particleRecord.disableColorCorrection = disableColorCorrection;
-      gprtGeomSetParameters(particleGeom, &particleRecord);
-      raygenData.disableColorCorrection = disableColorCorrection;
-      accumID = 1;
+    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&constants.disableBlueNoise)) {
+      constants.accumID = 1;
     }
 
-    if (ImGui::Checkbox("Disable Blue Noise", &disableBlueNoise)) {
-      raygenData.disableBlueNoise = disableBlueNoise;
-      accumID = 1;
+    if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&constants.disableTAA)) {
+      constants.accumID = 1;
     }
+
+    ImGui::DragFloat("Exposure", &constants.exposure, 0.01f, 0.0f, 5.f);
+    ImGui::DragFloat("Gamma", &constants.gamma, 0.01f, 0.0f, 5.f);
     
-    if (ImGui::Checkbox("Disable Temporal Antialiasing", &disableTAA)) {
-      raygenData.disableTAA = disableTAA;
-      accumID = 1;
-    }
-
-    static float exposure = 1.f;
-    static float gamma = 1.0f;
-    ini.get_float("exposure", exposure);
-    ini.get_float("gamma", gamma);
-    ImGui::DragFloat("Exposure", &exposure, 0.01f, 0.0f, 5.f);
-    ImGui::DragFloat("Gamma", &gamma, 0.01f, 0.0f, 5.f);
-    raygenData.exposure = exposure;
-    raygenData.gamma = gamma;
-
     bool fovChanged =
         ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f);
 
     static int mode = 1;
-    ini.get_int32("mode", mode);
     if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
-      accumID = 1;
+      constants.accumID = 1;
     if (ImGui::RadioButton("Splatting (Knoll 2019)", &mode, 0))
-      accumID = 1;
+      constants.accumID = 1;
 
     float speed = .001f;
     lastxpos = xpos;
@@ -775,26 +742,11 @@ int main(int argc, char *argv[]) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      raygenData.camera.pos = camera_pos;
-      raygenData.camera.dir_00 = camera_d00;
-      raygenData.camera.dir_du = camera_ddu;
-      raygenData.camera.dir_dv = camera_ddv;
-      if (camParams.empty()) {
-        auto error_pos =
-            ini.get_vec3f("camera.pos", raygenData.camera.pos.x,
-                          raygenData.camera.pos.y, raygenData.camera.pos.z);
-        auto error_dir00 = ini.get_vec3f(
-            "camera.dir_00", raygenData.camera.dir_00.x,
-            raygenData.camera.dir_00.y, raygenData.camera.dir_00.z);
-        auto error_dir_du = ini.get_vec3f(
-            "camera.dir_du", raygenData.camera.dir_du.x,
-            raygenData.camera.dir_du.y, raygenData.camera.dir_du.z);
-        auto error_dir_dv = ini.get_vec3f(
-            "camera.dir_dv", raygenData.camera.dir_dv.x,
-            raygenData.camera.dir_dv.y, raygenData.camera.dir_dv.z);
-      }
-
-      accumID = 1;
+      constants.camera.pos = camera_pos;
+      constants.camera.dir_00 = camera_d00;
+      constants.camera.dir_du = camera_ddu;
+      constants.camera.dir_dv = camera_ddv;
+      constants.accumID = 1;
     }
 
     if (rstate == GPRT_PRESS && !io.WantCaptureMouse) {
@@ -811,10 +763,8 @@ int main(int argc, char *argv[]) {
       }
 
       lookFrom = lookAt + view_vec;
-
-      raygenData.camera.pos = lookFrom;
-
-      accumID = 1;
+      constants.camera.pos = lookFrom;
+      constants.accumID = 1;
     }
 
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse) {
@@ -839,71 +789,40 @@ int main(int argc, char *argv[]) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      raygenData.camera.pos = camera_pos;
-      raygenData.camera.dir_00 = camera_d00;
-      raygenData.camera.dir_du = camera_ddu;
-      raygenData.camera.dir_dv = camera_ddv;
-      accumID = 1;
+      constants.camera.pos = camera_pos;
+      constants.camera.dir_00 = camera_d00;
+      constants.camera.dir_du = camera_ddu;
+      constants.camera.dir_dv = camera_ddv;
+      constants.accumID = 1;
     }
 
-    static float sigma = 3.f;
-    static float clampMaxCumulativeValue = 1.f;
-    static float unit = previousParticleRadius * .1f;
-    static float jitter = 1.f;
-    ini.get_float("sigma", sigma);
-    ini.get_float("clampMaxCumulativeValue", clampMaxCumulativeValue);
-    ini.get_float("unit", unit);
-    ini.get_float("jitter", jitter);
-    if (ImGui::DragFloat("clamp max cumulative value", &clampMaxCumulativeValue,
+    if (ImGui::DragFloat("clamp max cumulative value", &constants.clampMaxCumulativeValue,
                          1.f, 0.f, 5000.f)) {
-      accumID = 1;
+      constants.accumID = 1;
     }
-    if (ImGui::DragFloat("gaussian sigma", &sigma, 1.f, 0.f, 100.f)) {
-      accumID = 1;
-    }
-    if (ImGui::InputFloat("step size", &unit, 0.0f, 0.0f, "%.4f"))
-      accumID = 1;
-    if (ImGui::InputFloat("jitter", &jitter, 0.0f, 0.0f, "%.4f"))
-      accumID = 1;
-
-    static bool visualizeAttributes = true;
-    ini.get_bool("visualizeAttributes", visualizeAttributes);
-    if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes)) {
-      accumID = 1;
+    if (ImGui::InputFloat("step size", &constants.unit, 0.0f, 0.0f, "%.4f"))
+      constants.accumID = 1;
+    
+    if (ImGui::Checkbox("Visualize Attributes", (bool*)&constants.visualizeAttributes)) {
+      constants.accumID = 1;
     }
 
-    unit = std::max(unit, .0001f);
+    constants.unit = std::max(constants.unit, .0001f);
     static float azimuth = 0.f;
     static float elevation = 0.f;
     static float ambient = .5f;
-    ini.get_float("light.azimuth", azimuth);
-    ini.get_float("light.elevation", elevation);
-    ini.get_float("light.ambient", ambient);
 
     if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
-      accumID = 1;
+      constants.accumID = 1;
     if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
-      accumID = 1;
+      constants.accumID = 1;
     if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
-      accumID = 1;
+      constants.accumID = 1;
     ImGui::EndFrame();
 
-    static bool showHeatmap = false;
-    ini.get_bool("showHeatmap", showHeatmap);
-
-    raygenData.clampMaxCumulativeValue = clampMaxCumulativeValue;
-    raygenData.sigma = sigma;
-    raygenData.unit = unit;
-    raygenData.jitter = jitter;
-    raygenData.visualizeAttributes = visualizeAttributes;
-    raygenData.showHeatmap = showHeatmap;
-    raygenData.light.ambient = ambient;
-    raygenData.light.elevation = elevation;
-    raygenData.light.azimuth = azimuth;
-
-    particleRecord.clampMaxCumulativeValue = clampMaxCumulativeValue;
-    particleRecord.sigma = sigma;
-    particleRecord.visualizeAttributes = visualizeAttributes;
+    constants.light.ambient = ambient;
+    constants.light.elevation = elevation;
+    constants.light.azimuth = azimuth;
 
     bool forceRebuild = false;
     ;
@@ -917,9 +836,7 @@ int main(int argc, char *argv[]) {
       }
 
       particleRecord.numParticles = particles[particleFrame].size();
-      particleRecord.rbfRadius = previousParticleRadius;
       raygenData.numParticles = particles[particleFrame].size();
-      raygenData.rbfRadius = previousParticleRadius;
 
       // Upload some particles
       gprtBufferMap(particleBuffer);
@@ -936,7 +853,7 @@ int main(int argc, char *argv[]) {
       // note, unneeded boxes will be inactivated.
       int numWorkGroups =
           (numAABBs + 1023) / 1024; // 1024 threads per workgroup
-      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups);
+      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups, constants);
 
       bool testCompute = false;
       if (testCompute) {
@@ -977,16 +894,15 @@ int main(int argc, char *argv[]) {
       accelBuildTime = afterAccelBuild - beforeAccelBuild;
 
       // Assign tree to raygen parameters
-      raygenData.world = gprtAccelGetHandle(world);
-      accumID = 1;
+      constants.world = gprtAccelGetHandle(world);
+      constants.accumID = 1;
       previousParticleFrame = particleFrame;
     }
 
     double accelUpdateTime = 0.0;
-    if (previousParticleRadius != rbfRadius || radiusEdited || densityEdited ||
+    if (previousParticleRadius != constants.rbfRadius || radiusEdited || densityEdited ||
         forceRebuild) {
-      particleRecord.rbfRadius = rbfRadius;
-      raygenData.rbfRadius = rbfRadius;
+      
       gprtComputeSetParameters(GenRBFBounds, &particleRecord);
       gprtGeomSetParameters(particleGeom, &particleRecord);
       gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
@@ -994,7 +910,7 @@ int main(int argc, char *argv[]) {
       // Regenerate bounding boxes for new radius
       int numWorkGroups =
           (numAABBs + 1023) / 1024; // 1024 threads per workgroup
-      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups);
+      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups, constants);
 
       bool testCompute = false;
       if (testCompute) {
@@ -1034,18 +950,15 @@ int main(int argc, char *argv[]) {
       // std::endl;
 
       // Assign tree to raygen parameters
-      raygenData.world = gprtAccelGetHandle(world);
+      constants.world = gprtAccelGetHandle(world);
 
-      accumID = 1;
-      previousParticleRadius = rbfRadius;
+      constants.accumID = 1;
+      previousParticleRadius = constants.rbfRadius;
     }
 
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
-
-    raygenData.accumID = accumID;
-    raygenData.frameID = frameID;
 
     // copy raygen params
     gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
@@ -1078,22 +991,17 @@ int main(int argc, char *argv[]) {
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y);
+    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y, constants);
 
     // gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
 
-    accumID++;
-    ;
-    frameID++;
-    ;
+    constants.accumID++;
+    constants.frameID++;
 
     gprtBufferCopy(context, taaBuffer, taaPrevBuffer, 0, 0,
                    fbSize.x * fbSize.y);
 
-    // Clear .ini file so we don't read entries from it
-    // during the next loop iteration!
-    ini.clear();
   } while (!gprtWindowShouldClose(context));
 
   gprtBufferDestroy(particleBuffer);

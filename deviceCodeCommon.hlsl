@@ -32,7 +32,7 @@ GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1024, 1, 1)) {
 
   uint32_t particlesPerLeaf = record.particlesPerLeaf;
   uint32_t numParticles = record.numParticles;
-  float radius = record.rbfRadius;
+  float radius = pc.rbfRadius;
 
   float3 clusterAABBMin = float3(1.#INF, 1.#INF, 1.#INF);
   float3 clusterAABBMax = float3(-1.#INF, -1.#INF, -1.#INF);
@@ -135,7 +135,7 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
   float4 center = imageTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
 
   float4 pixelColor;
-  if (!record.disableTAA) {  
+  if (!pc.disableTAA) {  
     float3 minColor = rgb2ycocg(center.rgb);
     float3 maxColor = rgb2ycocg(center.rgb);
     for (int iy = -1; iy <= 1; ++iy)

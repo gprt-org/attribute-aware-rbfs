@@ -42,21 +42,14 @@ class ParticleTracker {
   float random;
   LCGRand rng; // for tracking
 
-  float unit;
-  float clampMaxCumulativeValue;
-  // RayDesc rayDesc;
-
   float4 albedo;
   float t;
 
   bool dbg;
-  bool visualizeAttributes;
-  bool disableColorCorrection;
 
   gprt::Texture cmap;
   gprt::Texture dmap;
   gprt::Sampler cmapSampler; 
-  gprt::Accel tree;
 
   float3 lb;
   float3 rt;
@@ -65,7 +58,6 @@ class ParticleTracker {
 
   bool shadowRay;
   bool doMarching;
-
 
   void track(RayDesc ray) {    
     if (doMarching) {
@@ -77,7 +69,7 @@ class ParticleTracker {
   }
   
   void stochasticMarching(RayDesc ray) {    
-    RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
+    RaytracingAccelerationStructure accel = gprt::getAccelHandle(pc.world);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
     Texture1D densitymap = gprt::getTexture1DHandle(dmap);
@@ -86,7 +78,7 @@ class ParticleTracker {
 
     // float 
     for (; i < MAX_DEPTH; ++i) {
-      t = t + unit; 
+      t = t + pc.unit; 
 
       // A boundary has been hit
       if (t >= ray.TMax) {
@@ -118,17 +110,17 @@ class ParticleTracker {
 
       if (payload.count > 0 && payload.density > 0.f) {
         payload.color /= payload.density;
-        if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
+        payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
       }
       else {
         continue;
       }
       
-      if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
+      if (pc.clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, pc.clampMaxCumulativeValue) / pc.clampMaxCumulativeValue;
 
       float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
-      if (!visualizeAttributes) {
+      if (!pc.visualizeAttributes) {
         float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
         payload.color.rgb = densityxf.rgb;
       }
@@ -153,7 +145,7 @@ class ParticleTracker {
   void stochasticTracking(RayDesc ray) {
     float majorant = 1.f;
 
-    RaytracingAccelerationStructure accel = gprt::getAccelHandle(tree);
+    RaytracingAccelerationStructure accel = gprt::getAccelHandle(pc.world);
     SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
     Texture1D colormap = gprt::getTexture1DHandle(cmap);
     Texture1D densitymap = gprt::getTexture1DHandle(dmap);
@@ -162,7 +154,7 @@ class ParticleTracker {
     t = ray.TMin;
     for (; i < MAX_DEPTH; ++i) {
       // Sample a distance
-      t = t - (log(1.0f - lcg_randomf(rng)) / majorant) * unit;
+      t = t - (log(1.0f - lcg_randomf(rng)) / majorant) * pc.unit;
 
       // A boundary has been hit
       if (t >= ray.TMax) {
@@ -195,15 +187,15 @@ class ParticleTracker {
 
       if (payload.count > 0) {
         payload.color /= payload.density;
-        if (!disableColorCorrection) payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
+        payload.color.rgb = pow(payload.color.rgb, 1.f / 2.2f);
       }
       else continue;
       
-      if (clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, clampMaxCumulativeValue) / clampMaxCumulativeValue;
+      if (pc.clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, pc.clampMaxCumulativeValue) / pc.clampMaxCumulativeValue;
 
       float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
-      if (!visualizeAttributes) {
+      if (!pc.visualizeAttributes) {
         float4 densityxf = colormap.SampleGrad(sampler, payload.density, 0.f, 0.f);
         payload.color.rgb = densityxf.rgb;
         // density = pow(densityxf.w, 3);
@@ -222,35 +214,32 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
   const int fbOfs = pixelID.x + fbSize.x * pixelID.y;
-  int accumID = record.accumID;
-  int frameID = record.frameID;
+  int accumID = pc.accumID;
+  int frameID = pc.frameID;
 
   LCGRand rng = get_rng(frameID, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
 
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
-  float3 rt = record.globalAABBMax + 2.f * record.rbfRadius;
-  float3 lb = record.globalAABBMin - 2.f * record.rbfRadius;
+  float3 rt = record.globalAABBMax + 2.f * pc.rbfRadius;
+  float3 lb = record.globalAABBMin - 2.f * pc.rbfRadius;
 
   float diagonal = length(rt - lb);
 
   RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
+  rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
 
   float tenter, texit;
   bool hit = aabbIntersection(rayDesc, lb, rt, tenter, texit);
 
-  // for now, assuming one global radius.
-  float radius = record.rbfRadius;
-  
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+  // for now, assuming one global radius.  
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(pc.world);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
-  float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
 
   ParticleTracker tracker;
   
@@ -258,7 +247,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   // the "free flight distance sampling" process. (figuring out how deep
   // a photon travels from the camera into the volume)
   float3 random;
-  if (!record.disableBlueNoise) {
+  if (!pc.disableBlueNoise) {
     Texture2D stbn = gprt::getTexture2DHandle(record.stbnTexture);
     // 8 by 16 grid of 256x256 blue noise textures 
     uint2 gridCoord = int2(frameID % 8, (frameID / 8) % 16);    
@@ -278,19 +267,14 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   random.y = lcg_randomf(rng);
   random.z = lcg_randomf(rng);
 
-  tracker.disableColorCorrection = record.disableColorCorrection;
   tracker.i = 0;
   tracker.LHS = 0;
   tracker.random = random.x;  
-  tracker.unit = record.unit;
-  tracker.visualizeAttributes = record.visualizeAttributes;
-  tracker.clampMaxCumulativeValue = record.clampMaxCumulativeValue;
   tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
   tracker.dbg = false;
   tracker.cmap = record.colormap;
   tracker.dmap = record.densitymap;
   tracker.cmapSampler = record.colormapSampler;
-  tracker.tree = record.world;
   tracker.lb = lb;
   tracker.rt = rt;
   tracker.shadowRay = false;
@@ -303,22 +287,22 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       tracker.dbg = true;
     }
     rayDesc.TMax = texit;
-    tracker.t = tenter + record.unit * random.y;
+    tracker.t = tenter + pc.unit * random.y;
     tracker.track(rayDesc);
 
     float4 albedo = tracker.albedo;
     float t = tracker.t;
-    float unit = record.unit;
+    float unit = pc.unit;
     float majorantExtinction = 1.f;
 
     // NEE shadow ray
     //   if we hit something and want to cast a shadow
     float visibility = 1.f;
-    if (albedo.a > 0.f && record.light.ambient != 1.f) {
+    if (albedo.a > 0.f && pc.light.ambient != 1.f) {
       float shadowTEnter, shadowTExit;
       RayDesc shadowRay;
       shadowRay.Origin = rayDesc.Origin + rayDesc.Direction * t;
-      shadowRay.Direction = getLightDirection(record.light.azimuth, record.light.elevation);
+      shadowRay.Direction = getLightDirection(pc.light.azimuth, pc.light.elevation);
       shadowRay.TMin = 0.f; 
       shadowRay.TMax = 10000.f;
       aabbIntersection(shadowRay, lb, rt, shadowTEnter, shadowTExit);
@@ -328,11 +312,11 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       tracker.dbg = false;
       tracker.LHS = 0;
       tracker.shadowRay = true;
-      if (record.disableBlueNoise) {
+      if (pc.disableBlueNoise) {
         tracker.t = 0.f;
       }
       else {
-        tracker.t = -record.unit * random.z;
+        tracker.t = -pc.unit * random.z;
       }
       tracker.track(shadowRay);
 
@@ -340,7 +324,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
     }
 
     if (albedo.w == 1.f) {
-      color.rgb = albedo.rgb * visibility * (1.f - record.light.ambient) + albedo.rgb * record.light.ambient;
+      color.rgb = albedo.rgb * visibility * (1.f - pc.light.ambient) + albedo.rgb * pc.light.ambient;
       color.w = 1.f;
     }
   }
@@ -354,8 +338,8 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
   // exposure and gamma
-  finalColor.rgb = finalColor.rgb * record.exposure;
-  finalColor.rgb = pow(finalColor.rgb, record.gamma);
+  finalColor.rgb = finalColor.rgb * pc.exposure;
+  finalColor.rgb = pow(finalColor.rgb, pc.gamma);
 
   // just the rendered image
   gprt::store(record.imageBuffer, fbOfs, finalColor);
@@ -373,13 +357,13 @@ GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
     if (primID >= numParticles) break;
     
     float4 particle = gprt::load<float4>(record.particles, primID);
-    float radius = record.rbfRadius;
+    float radius = pc.rbfRadius;
     radius *= radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
     float3 origin = WorldRayOrigin();
     if (distance(particle.xyz, origin) < radius) {
       RBFAttribute attr;
       attr.attribute = particle.w;
-      attr.density = evaluate_rbf(particle.xyz, origin, radius, record.sigma);
+      attr.density = evaluate_rbf(particle.xyz, origin, radius, 3.f);
       ReportHit(0.0f, 0, attr);
     }
   }
@@ -399,15 +383,10 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   
   payload.count += 1;
   payload.density += hit_particle.density * pow(color.w, 3);
-
-  if (record.disableColorCorrection) {
-    payload.color.rgb += color.rgb * hit_particle.density * pow(color.w, 3);
-  } else {
-    payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density * pow(color.w, 3);
-  }
+  payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density * pow(color.w, 3);
   
-  if (record.clampMaxCumulativeValue > 0.f && !record.visualizeAttributes) {
-    payload.density = min(payload.density, record.clampMaxCumulativeValue); 
+  if (pc.clampMaxCumulativeValue > 0.f && !pc.visualizeAttributes) {
+    payload.density = min(payload.density, pc.clampMaxCumulativeValue); 
     gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
   }
   gprt::ignoreHit(); // forces traversal to continue

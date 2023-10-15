@@ -59,17 +59,17 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   uint2 pixelID = DispatchRaysIndex().xy;
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
-  int accumID = record.accumID; // todo, change per frame
+  int accumID = pc.accumID; // todo, change per frame
   
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 
-  float3 rt = record.globalAABBMax + record.rbfRadius;
-  float3 lb = record.globalAABBMin - record.rbfRadius;
+  float3 rt = record.globalAABBMax + pc.rbfRadius;
+  float3 lb = record.globalAABBMin - pc.rbfRadius;
 
   RayDesc rayDesc;
-  rayDesc.Origin = record.camera.pos;
+  rayDesc.Origin = pc.camera.pos;
   rayDesc.Direction =
-      normalize(record.camera.dir_00 + screen.x * record.camera.dir_du + screen.y * record.camera.dir_dv);
+      normalize(pc.camera.dir_00 + screen.x * pc.camera.dir_du + screen.y * pc.camera.dir_dv);
   rayDesc.TMin = 0.0;
   rayDesc.TMax = 10000.0;
 
@@ -77,20 +77,17 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   bool hit = aabbIntersection(rayDesc, lb, rt, tenter, texit);
 
   // for now, assuming one global radius.
-  float radius = record.rbfRadius;
   float particlesPerSlab = PARTICLE_BUFFER_SIZE / 8; // just taking this for now
 
-  RaytracingAccelerationStructure world = gprt::getAccelHandle(record.world);
+  RaytracingAccelerationStructure world = gprt::getAccelHandle(pc.world);
   Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
   Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
   SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
-  float clampMaxCumulativeValue = record.clampMaxCumulativeValue;
-  int visualizeAttributes = record.visualizeAttributes;
 
   // float4 result_color = float4(1.f, 1.f, 1.f, 0.f);
   float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
   if (tenter < texit) {
-    const float slab_spacing = particlesPerSlab * record.unit;
+    const float slab_spacing = particlesPerSlab * pc.unit;
     float tslab = 0.f;
     
     while (tslab < texit) {
@@ -120,11 +117,11 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
         for (int i = 0; i < payload.tail; ++i) {
           float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
-          float drbf = evaluate_rbf(X, P.xyz, radius, record.sigma - 1.f);
-          if (clampMaxCumulativeValue) drbf = min(drbf, clampMaxCumulativeValue);
+          float drbf = evaluate_rbf(X, P.xyz, pc.rbfRadius, 3.f);
+          if (pc.clampMaxCumulativeValue) drbf = min(drbf, pc.clampMaxCumulativeValue);
 
           float4 color;
-          if (visualizeAttributes) {
+          if (pc.visualizeAttributes) {
             color = colormap.SampleGrad(colormapSampler, P.w, 0.f, 0.f);
             drbf = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).r;
             color.w *= drbf;
@@ -134,7 +131,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
             color.w = densitymap.SampleGrad(colormapSampler, drbf, 0.f, 0.f).r;
           }
 
-          color.w *= exp(-record.unit * particlesPerSlab);
+          color.w *= exp(-pc.unit * particlesPerSlab);
 
           result_color = over(result_color, color);
            
@@ -167,7 +164,7 @@ GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
     if (primID >= numParticles) break;
 
     float3 center = gprt::load<float4>(record.particles, primID).xyz;
-    float radius = record.rbfRadius;
+    float radius = pc.rbfRadius;
     float3 origin = WorldRayOrigin();
     float3 direction = WorldRayDirection();
     float t = distance(center, origin);
