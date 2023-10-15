@@ -22,8 +22,6 @@
 
 #include "sharedCode.h"
 
-#include "rng.h"
-
 [[vk::push_constant]] PushConstants pc;
 
 // https://www.sci.utah.edu/~wald/Publications/2019/rtgems/ParticleSplatting.pdf
@@ -62,7 +60,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   uint2 centerID = DispatchRaysDimensions().xy / 2;
   uint2 fbSize = DispatchRaysDimensions().xy;
   int accumID = record.accumID; // todo, change per frame
-  LCGRand rng = get_rng(accumID, DispatchRaysIndex().xy, DispatchRaysDimensions().xy);
   
   float2 screen = (float2(pixelID) + float2(.5f, .5f)) / float2(fbSize);
 

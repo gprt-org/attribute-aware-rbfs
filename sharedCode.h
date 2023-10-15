@@ -60,12 +60,13 @@ struct ParticleData {
 struct RayGenData {
   gprt::Texture guiTexture;
   gprt::Texture imageTexture;
+  gprt::Texture stbnTexture;
+
   gprt::Buffer frameBuffer;
   gprt::Buffer imageBuffer;
   gprt::Buffer taaBuffer;
   gprt::Buffer taaPrevBuffer;
   gprt::Buffer accumBuffer;
-  gprt::Buffer stbnBuffer;
   int2 fbSize;
   uint32_t accumID;
   uint32_t frameID;
@@ -108,6 +109,7 @@ struct RayGenData {
   int disableColorCorrection;
 
   int disableBlueNoise;
+  int disableBlueNoise2;
 
   int disableTAA;
 

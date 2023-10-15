@@ -254,20 +254,29 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
   ParticleTracker tracker;
   
+  // We'll use either spatio-temporal blue noise or white noise to drive
+  // the "free flight distance sampling" process. (figuring out how deep
+  // a photon travels from the camera into the volume)
   float3 random;
-  
-  gprt::Texture stbnHandle = gprt::load<gprt::Texture>(record.stbnBuffer, frameID % 64);
-  Texture2D stbn = gprt::getTexture2DHandle(stbnHandle);
-
   if (!record.disableBlueNoise) {
-    random = stbn[int2(pixelID.x % 128,pixelID.y % 128)].rgb;
+    Texture2D stbn = gprt::getTexture2DHandle(record.stbnTexture);
+    // 8 by 16 grid of 256x256 blue noise textures 
+    uint2 gridCoord = int2(frameID % 8, (frameID / 8) % 16);    
+    uint2 texCoord = int2(pixelID.x % 256, pixelID.y % 256);
+    uint2 coord = gridCoord * 256 + texCoord;
+    random.x = stbn[coord].x;
     tracker.doMarching = true;
-  }  
+  }
   else {
-    random = float3(lcg_randomf(rng), lcg_randomf(rng), lcg_randomf(rng));
+    random.x = lcg_randomf(rng);
     tracker.doMarching = false;
     tracker.rng = rng;
   }
+
+  // We'll use uniformly random numbers to handle unit-scale jitter.
+  // We use this to break up the wood grain artifacts from stochastic ray marching.
+  random.y = lcg_randomf(rng);
+  random.z = lcg_randomf(rng);
 
   tracker.disableColorCorrection = record.disableColorCorrection;
   tracker.i = 0;
@@ -294,7 +303,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       tracker.dbg = true;
     }
     rayDesc.TMax = texit;
-    tracker.t = tenter + record.unit * random.y * record.jitter;
+    tracker.t = tenter + record.unit * random.y;
     tracker.track(rayDesc);
 
     float4 albedo = tracker.albedo;
@@ -323,7 +332,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
         tracker.t = 0.f;
       }
       else {
-        tracker.t = -record.unit * random.z * record.jitter;
+        tracker.t = -record.unit * random.z;
       }
       tracker.track(shadowRay);
 

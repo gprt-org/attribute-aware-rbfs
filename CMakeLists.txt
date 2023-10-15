@@ -38,19 +38,11 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/rng.h
 )
 
-embed_devicecode(
-  OUTPUT_TARGET
-    deviceCodeVoxel
-  SOURCES
-    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeVoxel.hlsl
-)
-
 set(LIBRARIES 
   ${LIBRARIES}
   deviceCodeCommon 
   deviceCodeSplat 
   deviceCodeRBF
-  deviceCodeVoxel 
   gprt::gprt 
   imgui_gradient::imgui_gradient 
   argparse 
@@ -64,7 +56,7 @@ set(SOURCES
 add_executable(viewer)
 target_sources(viewer PRIVATE ${SOURCES})
 
-set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DSTBN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/stbn/")
+set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DSTBN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/")
 
 find_package(TBB)
 if (${TBB_FOUND})

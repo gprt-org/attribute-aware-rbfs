@@ -56,7 +56,6 @@
 extern GPRTProgram deviceCodeCommon;
 extern GPRTProgram deviceCodeSplat;
 extern GPRTProgram deviceCodeRBF;
-extern GPRTProgram deviceCodeVoxel;
 
 // initial image resolution
 const int2 fbSize = {1024, 1024};
@@ -306,14 +305,9 @@ int main(int argc, char *argv[]) {
   GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);
   GPRTModule moduleSplat = gprtModuleCreate(context, deviceCodeSplat);
   GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
-  GPRTModule moduleVoxel = gprtModuleCreate(context, deviceCodeVoxel);
 
   auto GenRBFBounds =
       gprtComputeCreate<ParticleData>(context, moduleCommon, "GenRBFBounds");
-  auto AccumulateRBFBounds = gprtComputeCreate<RayGenData>(
-      context, moduleCommon, "AccumulateRBFBounds");
-  auto AverageRBFBounds =
-      gprtComputeCreate<RayGenData>(context, moduleCommon, "AverageRBFBounds");
   auto CompositeGui =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "CompositeGui");
 
@@ -334,9 +328,6 @@ int main(int argc, char *argv[]) {
 
   GPRTRayGenOf<RayGenData> ParticleRBFRayGen =
       gprtRayGenCreate<RayGenData>(context, moduleRBF, "ParticleRBFRayGen");
-
-  GPRTRayGenOf<RayGenData> ParticleVoxelRayGen =
-      gprtRayGenCreate<RayGenData>(context, moduleVoxel, "ParticleVoxelRayGen");
 
   RayGenData raygenData = {};
 
@@ -366,27 +357,13 @@ int main(int argc, char *argv[]) {
 
   raygenData.fbSize = fbSize;
 
-  // Blue noise
-  std::vector<GPRTTextureOf<stbi_uc>> stbn(64);
-  std::vector<gprt::Texture> stbnHandles(64);
-  for (uint32_t i = 0; i < 64; ++i) {
-    std::string path = "";
-    path += STBN_DIR;
-    path += "stbn_vec3_2Dx1D_128x128x64_";
-    path += std::to_string(i);
-    path += ".png";
-    int texWidth, texHeight, texChannels;
-    stbi_uc *pixels = stbi_load(path.c_str(), &texWidth, &texHeight,
-                                &texChannels, STBI_rgb_alpha);
-
-    stbn[i] = gprtDeviceTextureCreate<stbi_uc>(
-        context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth,
-        texHeight, /*depth*/ 1,
-        /* generate mipmaps */ true, pixels);
-    stbnHandles[i] = gprtTextureGetHandle(stbn[i]);
-  }
-  auto stbnBuffer =
-      gprtDeviceBufferCreate<gprt::Texture>(context, 64, stbnHandles.data());
+  // Spatio-Temporal Blue noise
+  std::string path = STBN_DIR "256x256_l128_s16.png";
+  int texWidth, texHeight, texChannels;
+  stbi_uc *pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  GPRTTextureOf<stbi_uc> stbnTexture = gprtDeviceTextureCreate<stbi_uc>(
+    context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, 1, false, pixels
+  );  
 
   // Colormap for visualization
   auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
@@ -410,7 +387,7 @@ int main(int argc, char *argv[]) {
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
   raygenData.taaBuffer = gprtBufferGetHandle(taaBuffer);
   raygenData.taaPrevBuffer = gprtBufferGetHandle(taaPrevBuffer);
-  raygenData.stbnBuffer = gprtBufferGetHandle(stbnBuffer);
+  raygenData.stbnTexture = gprtTextureGetHandle(stbnTexture);
   raygenData.exposure = 1.f;
   raygenData.gamma = 1.0f;
   raygenData.colormap = gprtTextureGetHandle(colormap);
@@ -472,34 +449,13 @@ int main(int argc, char *argv[]) {
   gprtComputeSetParameters(GenRBFBounds, &particleRecord);
   gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
   gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
-  gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
 
   // Upload parameters
   gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-  // For now, allocate a grid of voxels for raster mode
-  auto voxelVolume = gprtDeviceBufferCreate<float4>(
-      context,
-      structuredGridResolution * structuredGridResolution *
-          structuredGridResolution,
-      nullptr);
-  auto voxelVolumeCount = gprtDeviceBufferCreate<float>(
-      context,
-      structuredGridResolution * structuredGridResolution *
-          structuredGridResolution,
-      nullptr);
-  gprtBufferClear(voxelVolume);
-  gprtBufferClear(voxelVolumeCount);
-  uint3 dims = uint3(structuredGridResolution, structuredGridResolution,
-                     structuredGridResolution);
-  raygenData.volume = gprtBufferGetHandle(voxelVolume);
-  raygenData.volumeCount = gprtBufferGetHandle(voxelVolumeCount);
-  raygenData.volumeDimensions = dims;
-
+  
   // copy raygen params
   gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
   gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
-  gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
   gprtBuildShaderBindingTable(context);
 
   std::string cmMarksStr, rmMarksStr, dmMarksStr;
@@ -567,8 +523,6 @@ int main(int argc, char *argv[]) {
   grayscaleWidgetSettings.flags =
       ImGG::Flag::NoColor | ImGG::Flag::NoColormapDropdown;
 
-  bool majorantsOutOfDate = true;
-  bool voxelized = false;
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
@@ -584,7 +538,7 @@ int main(int argc, char *argv[]) {
   float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool playAnimation = true;
-  static bool disableBlueNoise = false;
+  static bool disableBlueNoise = true;
   static bool disableTAA = true;
   std::stringstream frameStats;
 
@@ -639,8 +593,6 @@ int main(int argc, char *argv[]) {
       }
 
       accumID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
       gprtTextureUnmap(colormap);
     }
 
@@ -657,8 +609,6 @@ int main(int argc, char *argv[]) {
       }
 
       accumID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
       gprtTextureUnmap(radiusmap);
     }
 
@@ -675,8 +625,6 @@ int main(int argc, char *argv[]) {
       }
 
       accumID = 1;
-      voxelized = false;
-      majorantsOutOfDate = true;
       gprtTextureUnmap(densitymap);
     }
 
@@ -686,19 +634,16 @@ int main(int argc, char *argv[]) {
       particleRecord.disableColorCorrection = disableColorCorrection;
       gprtGeomSetParameters(particleGeom, &particleRecord);
       raygenData.disableColorCorrection = disableColorCorrection;
-      voxelized = false;
       accumID = 1;
     }
 
     if (ImGui::Checkbox("Disable Blue Noise", &disableBlueNoise)) {
       raygenData.disableBlueNoise = disableBlueNoise;
-      voxelized = false;
       accumID = 1;
     }
-
+    
     if (ImGui::Checkbox("Disable Temporal Antialiasing", &disableTAA)) {
       raygenData.disableTAA = disableTAA;
-      voxelized = false;
       accumID = 1;
     }
 
@@ -719,8 +664,6 @@ int main(int argc, char *argv[]) {
     if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
       accumID = 1;
     if (ImGui::RadioButton("Splatting (Knoll 2019)", &mode, 0))
-      accumID = 1;
-    if (ImGui::RadioButton("Voxelized", &mode, 2))
       accumID = 1;
 
     float speed = .001f;
@@ -914,13 +857,9 @@ int main(int argc, char *argv[]) {
     if (ImGui::DragFloat("clamp max cumulative value", &clampMaxCumulativeValue,
                          1.f, 0.f, 5000.f)) {
       accumID = 1;
-      majorantsOutOfDate = true;
-      voxelized = false;
     }
     if (ImGui::DragFloat("gaussian sigma", &sigma, 1.f, 0.f, 100.f)) {
       accumID = 1;
-      majorantsOutOfDate = true;
-      voxelized = false;
     }
     if (ImGui::InputFloat("step size", &unit, 0.0f, 0.0f, "%.4f"))
       accumID = 1;
@@ -931,7 +870,6 @@ int main(int argc, char *argv[]) {
     ini.get_bool("visualizeAttributes", visualizeAttributes);
     if (ImGui::Checkbox("Visualize Attributes", &visualizeAttributes)) {
       accumID = 1;
-      voxelized = false;
     }
 
     unit = std::max(unit, .0001f);
@@ -1040,9 +978,6 @@ int main(int argc, char *argv[]) {
 
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
-
-      voxelized = false;
-      majorantsOutOfDate = true;
       accumID = 1;
       previousParticleFrame = particleFrame;
     }
@@ -1101,24 +1036,8 @@ int main(int argc, char *argv[]) {
       // Assign tree to raygen parameters
       raygenData.world = gprtAccelGetHandle(world);
 
-      voxelized = false;
-      majorantsOutOfDate = true;
       accumID = 1;
       previousParticleRadius = rbfRadius;
-    }
-
-    // if we need to, revoxelize
-    if (mode == 2 && !voxelized) {
-      auto accumParams =
-          gprtComputeGetParameters<RayGenData>(AccumulateRBFBounds);
-      auto avgParams = gprtComputeGetParameters<RayGenData>(AverageRBFBounds);
-      *accumParams = *avgParams = raygenData;
-      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-      gprtBufferClear(voxelVolume);
-      gprtBufferClear(voxelVolumeCount);
-      gprtComputeLaunch1D(context, AccumulateRBFBounds, particles[particleFrame].size());
-      gprtComputeLaunch1D(context, AverageRBFBounds, dims.x * dims.y * dims.z);
-      voxelized = true;
     }
 
     gprtTextureClear(guiDepthAttachment);
@@ -1131,7 +1050,6 @@ int main(int argc, char *argv[]) {
     // copy raygen params
     gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
     gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
-    gprtRayGenSetParameters(ParticleVoxelRayGen, &raygenData);
 
     gprtComputeSetParameters(CompositeGui, &raygenData);
 
@@ -1145,9 +1063,6 @@ int main(int argc, char *argv[]) {
       break;
     case 1:
       gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y, constants);
-      break;
-    case 2:
-      gprtRayGenLaunch2D(context, ParticleVoxelRayGen, fbSize.x, fbSize.y, constants);
       break;
     default:
       break;
@@ -1186,7 +1101,6 @@ int main(int argc, char *argv[]) {
   gprtBufferDestroy(frameBuffer);
   gprtRayGenDestroy(ParticleSplatRayGen);
   gprtRayGenDestroy(ParticleRBFRayGen);
-  gprtRayGenDestroy(ParticleVoxelRayGen);
   gprtMissDestroy(miss);
   gprtAccelDestroy(particleAccel);
   gprtAccelDestroy(world);
@@ -1195,6 +1109,5 @@ int main(int argc, char *argv[]) {
   gprtModuleDestroy(moduleCommon);
   gprtModuleDestroy(moduleSplat);
   gprtModuleDestroy(moduleRBF);
-  gprtModuleDestroy(moduleVoxel);
   gprtContextDestroy(context);
 }
