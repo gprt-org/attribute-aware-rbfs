@@ -22,64 +22,7 @@
 
 #include "sharedCode.h"
 
-#include "rng.h"
-
 [[vk::push_constant]] PushConstants pc;
-
-GPRT_COMPUTE_PROGRAM(GenRBFBounds, (ParticleData, record), (1024, 1, 1)) {
-  uint32_t clusterID = DispatchThreadID.x; 
-  if (clusterID >= record.numAABBs) return;
-
-  uint32_t particlesPerLeaf = record.particlesPerLeaf;
-  uint32_t numParticles = record.numParticles;
-  float radius = pc.rbfRadius;
-
-  float3 clusterAABBMin = float3(1.#INF, 1.#INF, 1.#INF);
-  float3 clusterAABBMax = float3(-1.#INF, -1.#INF, -1.#INF);
-  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
-
-  const static float NaN = 0.0f / 0.0f;
-
-  // need this check since particles per frame can vary
-  if (clusterID * particlesPerLeaf > numParticles) {
-    // negative volume box, should be culled away per spec
-    clusterAABBMin = float3(NaN, NaN, NaN);
-    clusterAABBMax = float3(NaN, NaN, NaN);
-    gprt::store(record.aabbs, 2 * clusterID, clusterAABBMin);
-    gprt::store(record.aabbs, 2 * clusterID + 1, clusterAABBMax);
-    return;
-  }
-  
-  for (int i = 0; i < particlesPerLeaf; ++i) {
-    int primID = DispatchThreadID.x * particlesPerLeaf + i;
-    if (primID >= numParticles) break;
-
-    float4 particle = gprt::load<float4>(record.particles, primID);
-    float radiusPercent = radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
-
-    // if (clusterID == 0) printf("radiusPercent %f\n", radiusPercent);
-    if (radiusPercent == 0.f) continue;
-
-    float3 aabbMin = particle.xyz - float3(radius, radius, radius) * radiusPercent;
-    float3 aabbMax = particle.xyz + float3(radius, radius, radius) * radiusPercent;
-    if (i == 0) {
-      clusterAABBMin = aabbMin;
-      clusterAABBMax = aabbMax;
-    }
-    else {
-      clusterAABBMin = min(clusterAABBMin, aabbMin);
-      clusterAABBMax = max(clusterAABBMax, aabbMax);
-    }
-  }
-  if (any(clusterAABBMin > clusterAABBMax)) {
-    // negative volume box, should be culled away per spec
-    clusterAABBMin = float3(NaN, NaN, NaN);
-    clusterAABBMax = float3(NaN, NaN, NaN);
-  }
-  gprt::store(record.aabbs, 2 * clusterID, clusterAABBMin);
-  gprt::store(record.aabbs, 2 * clusterID + 1, clusterAABBMax);
-}
 
 float3 rgb2ycocg(in float3 rgb)
 {
@@ -89,7 +32,6 @@ float3 rgb2ycocg(in float3 rgb)
     float y = t + cg / 2.0;
     return float3(y, co, cg);
 }
-
 
 float3 ycocg2rgb(in float3 ycocg)
 {
@@ -176,4 +118,4 @@ struct [raypayload] NullPayload{
   int tmp;
 };
 
-GPRT_MISS_PROGRAM(miss, (MissProgData, record), (NullPayload, payload)) {}
+GPRT_MISS_PROGRAM(miss, (UnusedRecord, record), (NullPayload, payload)) {}

@@ -15,7 +15,15 @@ embed_devicecode(
     ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeCommon.hlsl
   HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
-    ${CMAKE_CURRENT_SOURCE_DIR}/rng.h
+)
+
+embed_devicecode(
+  OUTPUT_TARGET
+    deviceCodeBounds
+  SOURCES
+    ${CMAKE_CURRENT_SOURCE_DIR}/deviceCodeBounds.hlsl
+  HEADERS
+    ${CMAKE_CURRENT_SOURCE_DIR}/sharedCode.h
 )
 
 embed_devicecode(
@@ -41,6 +49,7 @@ embed_devicecode(
 set(LIBRARIES 
   ${LIBRARIES}
   deviceCodeCommon 
+  deviceCodeBounds
   deviceCodeSplat 
   deviceCodeRBF
   gprt::gprt 

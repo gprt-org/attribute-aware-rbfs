@@ -37,21 +37,24 @@
 // Our shared data structures between host and device
 #include "sharedCode.h"
 
+// For parallel sorting of points along a hilbert curve
+#include "hilbert.h"
+
 /* imgui for a small user interface */
 #include "imgui.h"
 #include <imgui_gradient/imgui_gradient.hpp>
 
-#include <fstream>
-#include <iostream>
-
+//argument parsing
 #include <argparse/argparse.hpp>
 
-// For parallel sorting of points along a hilbert curve
-#include "hilbert.h"
+// misc
+#include <fstream>
+#include <iostream>
 #include <algorithm>
 #include <execution>
 
 extern GPRTProgram deviceCodeCommon;
+extern GPRTProgram deviceCodeBounds;
 extern GPRTProgram deviceCodeSplat;
 extern GPRTProgram deviceCodeRBF;
 
@@ -67,8 +70,6 @@ float cosFovy = 0.66f;
 uint32_t particlesPerLeaf = 1;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
-
-uint32_t structuredGridResolution = 256;
 
 static std::vector<std::string> string_split(std::string s, char delim) {
   std::vector<std::string> result;
@@ -296,11 +297,12 @@ int main(int argc, char *argv[]) {
   int32_t GPU = 0;
   GPRTContext context = gprtContextCreate(&GPU);
   GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);
+  GPRTModule moduleBounds = gprtModuleCreate(context, deviceCodeBounds);
   GPRTModule moduleSplat = gprtModuleCreate(context, deviceCodeSplat);
   GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
 
   auto GenRBFBounds =
-      gprtComputeCreate<ParticleData>(context, moduleCommon, "GenRBFBounds");
+      gprtComputeCreate<UnusedRecord>(context, moduleBounds, "GenRBFBounds");
   auto CompositeGui =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "CompositeGui");
 
@@ -314,8 +316,8 @@ int main(int argc, char *argv[]) {
                                   "ParticleRBFIntersection");
   gprtGeomTypeSetAnyHitProg(particleType, 0, moduleRBF, "ParticleRBFAnyHit");
 
-  GPRTMissOf<MissProgData> miss =
-      gprtMissCreate<MissProgData>(context, moduleCommon, "miss");
+  GPRTMissOf<UnusedRecord> miss =
+      gprtMissCreate<UnusedRecord>(context, moduleCommon, "miss");
   GPRTRayGenOf<RayGenData> ParticleSplatRayGen =
       gprtRayGenCreate<RayGenData>(context, moduleSplat, "ParticleSplatRayGen");
 
@@ -373,9 +375,6 @@ int main(int argc, char *argv[]) {
                         GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP);
 
   PushConstants constants;
-  constants.rayTypeCount = 2;
-  constants.exposure = 1.f;
-  constants.gamma = 1.0f;
 
   raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
@@ -410,24 +409,16 @@ int main(int argc, char *argv[]) {
 
   ParticleData particleRecord{};
 
-  // particleRecord.numParticles = particles[0].size();
-  particleRecord.particlesPerLeaf = particlesPerLeaf;
-  particleRecord.numAABBs = numAABBs;
+  constants.particlesPerLeaf = particlesPerLeaf;
+  // constants.numAABBs = numAABBs;
 
-  // particleRecord.rbfRadius = rbfRadius;
-  particleRecord.aabbs = gprtBufferGetHandle(aabbBuffer);
-  particleRecord.particles = gprtBufferGetHandle(particleBuffer);
+  // constants.aabbs = gprtBufferGetHandle(aabbBuffer);
+  constants.particles = gprtBufferGetHandle(particleBuffer);
   particleRecord.colormap = gprtTextureGetHandle(colormap);
   particleRecord.radiusmap = gprtTextureGetHandle(radiusmap);
   particleRecord.colormapSampler = gprtSamplerGetHandle(sampler);
 
-  // also assign particles to raygen
-  raygenData.particles = gprtBufferGetHandle(particleBuffer);
-  // raygenData.numParticles = particles[0].size();
-  raygenData.particlesPerLeaf = particlesPerLeaf;
-
   gprtGeomSetParameters(particleGeom, &particleRecord);
-  gprtComputeSetParameters(GenRBFBounds, &particleRecord);
   gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
   gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
 
@@ -520,41 +511,44 @@ int main(int argc, char *argv[]) {
   constants.disableTAA = false;
   std::stringstream frameStats;
 
-  constants.exposure = 1.0f;
-  constants.gamma = 1.0f;
   constants.rbfRadius = previousParticleRadius;
   constants.clampMaxCumulativeValue = 1.f;
   constants.unit = previousParticleRadius * .1f;
   constants.visualizeAttributes = true;
+  constants.light.azimuth = 0.f;
+  constants.light.elevation = 0.f;
+  constants.light.ambient = .5f;
+  constants.frameID = 0;
 
   do {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
 
+    // Time controls
     static int particleFrame = 0;
-
     ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
-
-    if (ImGui::Button("Play Animation")) {
-      playAnimation = true;
-    }
-    if (ImGui::Button("Pause Animation")) {
-      playAnimation = false;
-    }
-
+    if (ImGui::Button("Play Animation")) playAnimation = true;
+    if (ImGui::Button("Pause Animation")) playAnimation = false;
     if (playAnimation) {
       particleFrame++;
       if (particleFrame >= particles.size())
         particleFrame = 1;
       constants.accumID = 1;
+
+      if (synthetic) {
+        constants.light.azimuth = sin(gprtGetTime(context)) * .5 + .5;
+        constants.light.elevation = cos(gprtGetTime(context));
+        constants.accumID = 1;
+      }
     }
 
+    // Radius and colormap controls
+    bool radiusEdited = ImGui::DragFloat("Particle Radius", &constants.rbfRadius, 
+                      0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
     if (constants.rbfRadius != previousParticleRadius && radiusArg > 0.f)
       constants.rbfRadius = radiusArg;
-
-    ImGui::DragFloat("Particle Radius", &constants.rbfRadius, 0.0001f * diagonal,
-                     .0001f * diagonal, 1.f * diagonal, "%.5f");
-
+    bool densityEdited = false;
+          
     auto make_8bit = [](const float f) -> uint32_t {
       return std::min(255, std::max(0, int(f * 256.f)));
     };
@@ -575,7 +569,6 @@ int main(int argc, char *argv[]) {
       gprtTextureUnmap(colormap);
     }
 
-    bool radiusEdited = false;
     if (radiusmapWidget.widget("RBF Radius", grayscaleWidgetSettings) ||
         firstFrame) {
       radiusEdited = true;
@@ -591,7 +584,6 @@ int main(int argc, char *argv[]) {
       gprtTextureUnmap(radiusmap);
     }
 
-    bool densityEdited = false;
     if (densitymapWidget.widget("RBF Density", grayscaleWidgetSettings) ||
         firstFrame) {
       densityEdited = true;
@@ -607,19 +599,11 @@ int main(int argc, char *argv[]) {
       gprtTextureUnmap(densitymap);
     }
 
-    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&constants.disableBlueNoise)) {
+    // Blue noise controls
+    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&constants.disableBlueNoise))
       constants.accumID = 1;
-    }
-
-    if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&constants.disableTAA)) {
+    if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&constants.disableTAA))
       constants.accumID = 1;
-    }
-
-    ImGui::DragFloat("Exposure", &constants.exposure, 0.01f, 0.0f, 5.f);
-    ImGui::DragFloat("Gamma", &constants.gamma, 0.01f, 0.0f, 5.f);
-    
-    bool fovChanged =
-        ImGui::DragFloat("Field of View", &cosFovy, .01f, 0.1f, 3.f);
 
     static int mode = 1;
     if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
@@ -654,33 +638,10 @@ int main(int argc, char *argv[]) {
     int right_shift = gprtGetKey(context, GPRT_KEY_RIGHT_SHIFT);
     int shift = left_shift || right_shift;
 
-    // close window on Ctrl-W press
-    if (w_state && ctrl_state) {
-      break;
-    }
-    // close window on Ctrl-C press
-    if (c_state && ctrl_state) {
-      break;
-    }
-    // Shift-C prints the cam
-    if (c_state && shift) {
-      std::cout << "--camera " << lookFrom.x << ' ' << lookFrom.y << ' '
-                << lookFrom.z << ' ' << lookAt.x << ' ' << lookAt.y << ' '
-                << lookAt.z << ' ' << lookUp.x << ' ' << lookUp.y << ' '
-                << lookUp.z << ' ' << cosFovy << '\n';
-    }
-    // Shift-B prints the aabb and center of _this_ time step
-    if (b_state && shift) {
-      std::cout << "AABB(" << particleFrame << "): " << aabbs[particleFrame * 2]
-                << ',' << aabbs[particleFrame * 2 + 1] << ", center: "
-                << (aabbs[particleFrame * 2] + aabbs[particleFrame * 2 + 1]) *
-                       0.5f
-                << ", diagonal: "
-                << length(aabbs[particleFrame * 2] -
-                          aabbs[particleFrame * 2 + 1])
-                << '\n';
-    }
-
+    // close window on Ctrl-W press or Ctrl-C press
+    if (w_state && ctrl_state || c_state && ctrl_state) break;
+    
+    // Flip the "up" direction
     if (x_state) {
       lookUp = float3(1.f, 0.f, 0.f);
       if (left_shift)
@@ -701,13 +662,13 @@ int main(int argc, char *argv[]) {
 
     // If we click the mouse, we should rotate the camera
     if (state == GPRT_PRESS && !io.WantCaptureMouse || x_state || y_state ||
-        z_state || fovChanged || firstFrame) {
+        z_state || firstFrame) {
       firstFrame = false;
       float4 position = {lookFrom.x, lookFrom.y, lookFrom.z, 1.f};
       float4 pivot = {lookAt.x, lookAt.y, lookAt.z, 1.0};
-#ifndef M_PI
-#define M_PI 3.1415926f
-#endif
+      #ifndef M_PI
+      #define M_PI 3.1415926f
+      #endif
 
       // step 1 : Calculate the amount of rotation given the mouse movement.
       float deltaAngleX = (2 * M_PI / fbSize.x);
@@ -802,144 +763,64 @@ int main(int argc, char *argv[]) {
     }
 
     constants.unit = std::max(constants.unit, .0001f);
-    static float azimuth = 0.f;
-    static float elevation = 0.f;
-    static float ambient = .5f;
 
-    if (ImGui::SliderFloat("azimuth", &azimuth, 0.f, 1.f))
+
+    if (ImGui::SliderFloat("azimuth", &constants.light.azimuth, 0.f, 1.f))
       constants.accumID = 1;
-    if (ImGui::SliderFloat("elevation", &elevation, -1.f, 1.f))
+    if (ImGui::SliderFloat("elevation", &constants.light.elevation, -1.f, 1.f))
       constants.accumID = 1;
-    if (ImGui::SliderFloat("ambient", &ambient, 0.f, 1.f))
+    if (ImGui::SliderFloat("ambient", &constants.light.ambient, 0.f, 1.f))
       constants.accumID = 1;
     ImGui::EndFrame();
 
-    constants.light.ambient = ambient;
-    constants.light.elevation = elevation;
-    constants.light.azimuth = azimuth;
-
-    bool forceRebuild = false;
-    ;
-
-    double accelBuildTime = 0.0;
-    if (previousParticleFrame != particleFrame || forceRebuild) {
-
-      if (synthetic) {
-        azimuth = sin(gprtGetTime(context)) * .5 + .5;
-        elevation = cos(gprtGetTime(context));
+    bool frameChanged = previousParticleFrame != particleFrame;
+    bool radiusChanged = previousParticleRadius != constants.rbfRadius || radiusEdited || densityEdited;
+    
+    // Particle manipulation
+    if ( frameChanged || radiusChanged) 
+    {
+      if (frameChanged) {
+        // Upload some particles
+        gprtBufferMap(particleBuffer);
+        float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
+        memcpy(particlePositions, particles[particleFrame].data(),
+              sizeof(float4) * particles[particleFrame].size());
+        gprtBufferUnmap(particleBuffer);
       }
 
-      particleRecord.numParticles = particles[particleFrame].size();
-      raygenData.numParticles = particles[particleFrame].size();
-
-      // Upload some particles
-      gprtBufferMap(particleBuffer);
-      float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
-      memcpy(particlePositions, particles[particleFrame].data(),
-             sizeof(float4) * particles[particleFrame].size());
-      gprtBufferUnmap(particleBuffer);
-
-      gprtComputeSetParameters(GenRBFBounds, &particleRecord);
-      gprtGeomSetParameters(particleGeom, &particleRecord);
-      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
+      constants.numParticles = particles[particleFrame].size();
+     
       // Generate bounding boxes for those particles
       // note, unneeded boxes will be inactivated.
-      int numWorkGroups =
-          (numAABBs + 1023) / 1024; // 1024 threads per workgroup
-      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups, constants);
+      BoundsConstants bc;
+      bc.aabbs = gprtBufferGetHandle(aabbBuffer);
+      bc.numAABBs = numAABBs;
+      bc.particles = gprtBufferGetHandle(particleBuffer);
+      bc.numParticles = particles[particleFrame].size();
+      bc.particlesPerLeaf = constants.particlesPerLeaf;
+      bc.rbfRadius = constants.rbfRadius;
+      bc.radiusmap = gprtTextureGetHandle(radiusmap);
+      int numWorkGroups = (numAABBs + 1023) / 1024; // 1024 threads per workgroup
+      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups, bc);
 
-      bool testCompute = false;
-      if (testCompute) {
-        gprtBufferMap(aabbBuffer);
-        gprtBufferMap(particleBuffer);
-        float3 *aabbs = gprtBufferGetPointer(aabbBuffer);
-        float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
-
-        for (uint32_t i = 0; i < maxNumParticles; ++i) {
-          if (particlePositions[i].x < aabbs[i * 2 + 0].x)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].y < aabbs[i * 2 + 0].y)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].z < aabbs[i * 2 + 0].z)
-            throw std::runtime_error("Error");
-
-          if (particlePositions[i].x > aabbs[i * 2 + 1].x)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].y > aabbs[i * 2 + 1].y)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].z > aabbs[i * 2 + 1].z)
-            throw std::runtime_error("Error");
-        }
-
-        gprtBufferUnmap(particleBuffer);
-        gprtBufferUnmap(aabbBuffer);
+      // Build an entirely new tree
+      if (radiusChanged) {
+        gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
+        gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
+        constants.world = gprtAccelGetHandle(world);
+      }
+      // Refit the tree if particles didn't move
+      else {
+        gprtAccelUpdate(context, particleAccel);
+        gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
       }
 
-      // Now we can build the tree
-      gprtAccelBuild(context, particleAccel,
-                     GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
-      size_t particleSize = gprtBufferGetSize(particleBuffer);
-      size_t aabbSize = gprtBufferGetSize(aabbBuffer);
-      size_t accelSize = gprtAccelGetSize(particleAccel);
-      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-
-      // Assign tree to raygen parameters
-      constants.world = gprtAccelGetHandle(world);
       constants.accumID = 1;
       previousParticleFrame = particleFrame;
-    }
-
-    if (previousParticleRadius != constants.rbfRadius || radiusEdited || densityEdited ||
-        forceRebuild) {
-      
-      gprtComputeSetParameters(GenRBFBounds, &particleRecord);
-      gprtGeomSetParameters(particleGeom, &particleRecord);
-      gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
-
-      // Regenerate bounding boxes for new radius
-      int numWorkGroups =
-          (numAABBs + 1023) / 1024; // 1024 threads per workgroup
-      gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups, constants);
-
-      bool testCompute = false;
-      if (testCompute) {
-        gprtBufferMap(aabbBuffer);
-        gprtBufferMap(particleBuffer);
-        float3 *aabbs = gprtBufferGetPointer(aabbBuffer);
-        float4 *particlePositions = gprtBufferGetPointer(particleBuffer);
-
-        for (uint32_t i = 0; i < maxNumParticles; ++i) {
-          if (particlePositions[i].x < aabbs[i * 2 + 0].x)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].y < aabbs[i * 2 + 0].y)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].z < aabbs[i * 2 + 0].z)
-            throw std::runtime_error("Error");
-
-          if (particlePositions[i].x > aabbs[i * 2 + 1].x)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].y > aabbs[i * 2 + 1].y)
-            throw std::runtime_error("Error");
-          if (particlePositions[i].z > aabbs[i * 2 + 1].z)
-            throw std::runtime_error("Error");
-        }
-
-        gprtBufferUnmap(particleBuffer);
-        gprtBufferUnmap(aabbBuffer);
-      }
-
-      // Now we can refit the tree
-      gprtAccelUpdate(context, particleAccel);
-      gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-      
-      // Assign tree to raygen parameters
-      constants.world = gprtAccelGetHandle(world);
-
-      constants.accumID = 1;
       previousParticleRadius = constants.rbfRadius;
     }
 
+    // Render the user interface
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
@@ -947,11 +828,9 @@ int main(int argc, char *argv[]) {
     // copy raygen params
     gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
     gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
-
     gprtComputeSetParameters(CompositeGui, &raygenData);
-
     gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
-
+    
     gprtBeginProfile(context);
 
     switch (mode) {
@@ -965,19 +844,11 @@ int main(int argc, char *argv[]) {
       break;
     }
 
-    float profile = gprtEndProfile(context);
-    static float tavg = profile;
-    tavg = 0.8 * tavg + 0.2 * profile;
-
-    char title[1000];
-    sprintf(title, "%.2f FPS", (1.0 / tavg));
-
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
     gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y, constants);
 
-    // gprtSetWindowTitle(context, title);
     gprtBufferPresent(context, frameBuffer);
 
     constants.accumID++;
@@ -999,6 +870,7 @@ int main(int argc, char *argv[]) {
   gprtGeomDestroy(particleGeom);
   gprtGeomTypeDestroy(particleType);
   gprtModuleDestroy(moduleCommon);
+  gprtModuleDestroy(moduleBounds);
   gprtModuleDestroy(moduleSplat);
   gprtModuleDestroy(moduleRBF);
   gprtContextDestroy(context);

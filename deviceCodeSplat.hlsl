@@ -100,14 +100,14 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
       if (rayDesc.TMax > tenter)
       {
-        TraceRay(world,                  // the tree
-                RAY_FLAG_NONE,           // ray flags
-                0xff,                    // instance inclusion mask
-                1,                       // ray type
-                pc.rayTypeCount,         // number of ray types
-                0,                       // miss type
-                rayDesc,                 // the ray to trace
-                payload                  // the payload IO
+        TraceRay(world,        // the tree
+                RAY_FLAG_NONE, // ray flags
+                0xff,          // instance inclusion mask
+                1,             // ray type
+                2,             // number of ray types
+                0,             // miss type
+                rayDesc,       // the ray to trace
+                payload        // the payload IO
         );
 
         // if (all(pixelID == centerID)) printf("%d\n", payload.tail);
@@ -115,7 +115,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
         // Integrate depth-sorted list of particles
         for (int i = 0; i < payload.tail; ++i) {
-          float4 P = gprt::load<float4>(record.particles, payload.particles[i].id);
+          float4 P = gprt::load<float4>(pc.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
           float drbf = evaluate_rbf(X, P.xyz, pc.rbfRadius, 3.f);
           if (pc.clampMaxCumulativeValue) drbf = min(drbf, pc.clampMaxCumulativeValue);
@@ -156,14 +156,14 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
 
 GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
   uint clusterID = PrimitiveIndex();
-  uint32_t particlesPerLeaf = record.particlesPerLeaf;
-  uint32_t numParticles = record.numParticles;
+  uint32_t particlesPerLeaf = pc.particlesPerLeaf;
+  uint32_t numParticles = pc.numParticles;
   
   for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
     uint32_t primID = clusterID * particlesPerLeaf + i;
     if (primID >= numParticles) break;
 
-    float3 center = gprt::load<float4>(record.particles, primID).xyz;
+    float3 center = gprt::load<float4>(pc.particles, primID).xyz;
     float radius = pc.rbfRadius;
     float3 origin = WorldRayOrigin();
     float3 direction = WorldRayDirection();

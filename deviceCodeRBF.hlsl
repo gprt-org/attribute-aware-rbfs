@@ -98,14 +98,14 @@ class ParticleTracker {
       payload.count = 0;
       payload.density = 0.f;       
       payload.color = float4(0.f, 0.f, 0.f, 0.f);
-      TraceRay(accel,                  // the tree
-              RAY_FLAG_NONE,           // ray flags
-              0xff,                    // instance inclusion mask
-              0,                       // ray type
-              pc.rayTypeCount,         // number of ray types
-              0,                       // miss type
-              pointDesc,               // the ray to trace
-              payload                  // the payload IO
+      TraceRay(accel,        // the tree
+              RAY_FLAG_NONE, // ray flags
+              0xff,          // instance inclusion mask
+              0,             // ray type
+              2,             // number of ray types
+              0,             // miss type
+              pointDesc,     // the ray to trace
+              payload        // the payload IO
       );
 
       if (payload.count > 0 && payload.density > 0.f) {
@@ -174,14 +174,14 @@ class ParticleTracker {
       payload.count = 0;
       payload.density = 0.f;       
       payload.color = float4(0.f, 0.f, 0.f, 0.f);
-      TraceRay(accel,                  // the tree
-              RAY_FLAG_NONE,           // ray flags
-              0xff,                    // instance inclusion mask
-              0,                       // ray type
-              pc.rayTypeCount,         // number of ray types
-              0,                       // miss type
-              pointDesc,               // the ray to trace
-              payload                  // the payload IO
+      TraceRay(accel,        // the tree
+              RAY_FLAG_NONE, // ray flags
+              0xff,          // instance inclusion mask
+              0,             // ray type
+              2,             // number of ray types
+              0,             // miss type
+              pointDesc,     // the ray to trace
+              payload        // the payload IO
       );
 
 
@@ -337,18 +337,14 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   float4 finalColor = (1.f / float(accumID)) * color + (float(accumID - 1) / float(accumID)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
 
-  // exposure and gamma
-  finalColor.rgb = finalColor.rgb * pc.exposure;
-  finalColor.rgb = pow(finalColor.rgb, pc.gamma);
-
   // just the rendered image
   gprt::store(record.imageBuffer, fbOfs, finalColor);
 }
 
 GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
   uint clusterID = PrimitiveIndex();
-  uint32_t particlesPerLeaf = record.particlesPerLeaf;
-  uint32_t numParticles = record.numParticles;
+  uint32_t particlesPerLeaf = pc.particlesPerLeaf;
+  uint32_t numParticles = pc.numParticles;
   SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
   Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
   
@@ -356,7 +352,7 @@ GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
     uint32_t primID = clusterID * particlesPerLeaf + i;
     if (primID >= numParticles) break;
     
-    float4 particle = gprt::load<float4>(record.particles, primID);
+    float4 particle = gprt::load<float4>(pc.particles, primID);
     float radius = pc.rbfRadius;
     radius *= radiusmap.SampleGrad(sampler, particle.w, 0.f, 0.f).r;
     float3 origin = WorldRayOrigin();

@@ -29,11 +29,10 @@
 #define FLOAT_EPSILON 1.19209290e-7F
 #define DOUBLE_EPSILON 2.2204460492503131e-16
 
-/* Constants available to all programs */
+/* Constants available to all ray tracing programs */
 struct PushConstants {
-  int rayTypeCount;
-  uint32_t accumID;
-  uint32_t frameID;
+  uint16_t accumID;
+  uint16_t frameID;
 
   // parameters for light controls
   struct {
@@ -49,41 +48,47 @@ struct PushConstants {
     float3 dir_du;
     float3 dir_dv;
   } camera;
-
-  float exposure;
-  float gamma;
   
   // a global scale for the particles
   float rbfRadius;
 
-  int disableBlueNoise;
-  int disableTAA;
+  // used for tree compression
+  uint16_t particlesPerLeaf;
+
+  // A switch to visualize either RBF density or per-particle attributes
+  uint16_t disableBlueNoise;
+  uint16_t disableTAA;
+  uint16_t visualizeAttributes;
 
   // For controling the relative density of delta tracking
   float unit;
-
-  // A switch to visualize either RBF density or per-particle attributes
-  int visualizeAttributes;
-
   float clampMaxCumulativeValue;
 
   // Acceleration structure containing our particles
   gprt::Accel world;
+  gprt::Buffer particles;
+  uint32_t numParticles;
+};
+
+// Struct avaiable selectively for particle bounds calculation
+struct BoundsConstants {
+  gprt::Buffer aabbs;
+  uint32_t numAABBs;
+
+  gprt::Buffer particles;
+  uint32_t numParticles;
+  uint16_t particlesPerLeaf;
+
+  float rbfRadius;
+  gprt::Texture radiusmap;
 };
 
 /* variables available to all programs */
 
 struct ParticleData {
-  uint32_t particlesPerLeaf;
-  uint32_t numParticles;
-
   gprt::Texture colormap;
   gprt::Texture radiusmap;
   gprt::Sampler colormapSampler;
-
-  gprt::Buffer particles;
-  gprt::Buffer aabbs;
-  int numAABBs;
 };
 
 struct RayGenData {
@@ -100,9 +105,6 @@ struct RayGenData {
 
   float3 globalAABBMin;
   float3 globalAABBMax;
-  gprt::Buffer particles;
-  uint32_t particlesPerLeaf;
-  uint32_t numParticles;
 
   // colormap for visualization
   gprt::Texture colormap;
@@ -111,8 +113,8 @@ struct RayGenData {
   gprt::Sampler colormapSampler;
 };
 
-/* variables for the miss program. (currently unused) */
-struct MissProgData {
+/* Struct for unused records. */
+struct UnusedRecord {
   int tmp;
 };
 
