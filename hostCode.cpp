@@ -27,7 +27,7 @@
 #include <gprt.h>
 
 // An example particle importer
-#include "importers/import_points.h"
+#include "importParticles.h"
 
 // stb for image loading and storing
 #define STB_IMAGE_STATIC
@@ -48,7 +48,6 @@
 
 // For parallel sorting of points along a hilbert curve
 #include "hilbert.h"
-#include "timer.h"
 #include <algorithm>
 #include <execution>
 
@@ -107,8 +106,8 @@ void pretty_bytes(uint32_t bytes) {
 int main(int argc, char *argv[]) {
   argparse::ArgumentParser program("RT Point Clouds");
 
-  program.add_argument("--points")
-      .help("A path to our custom points dataset (ending in .points)")
+  program.add_argument("--particles")
+      .help("A path to our custom particles dataset (ending in .particles)")
       .default_value("");
 
   program.add_argument("--camera")
@@ -137,11 +136,19 @@ int main(int argc, char *argv[]) {
 
   std::vector<std::vector<std::pair<uint64_t, float4>>> particleData;
 
-  std::string pointsPath = program.get<std::string>("--points");
+  std::string particlesPath = program.get<std::string>("--particles");
   bool synthetic = false;
-  if (pointsPath != "") {
-    std::cout << "loading " << pointsPath << std::endl;
-    importPoints(pointsPath, particleData);
+  if (particlesPath != "") {
+    std::cout << "loading " << particlesPath << std::endl;
+    std::vector<std::vector<float4>> particles = importParticles(particlesPath);
+    // wrangle particles into a pair data structure for later sorting
+    particleData.resize(particles.size());
+    for (uint32_t i = 0; i < particles.size(); ++i) {
+      particleData[i].resize(particles[i].size());
+      for (uint32_t j = 0; j < particles[i].size(); ++j) {
+        particleData[i][j].second = particles[i][j];
+      }
+    }
   } else {
     synthetic = true;
     particleData.resize(500);
@@ -228,7 +235,6 @@ int main(int argc, char *argv[]) {
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
-  double beforeHilbert = getCurrentTime();
   for (size_t j = 0; j < particleData.size(); ++j) {
     std::for_each(std::execution::par_unseq, std::begin(particleData[j]),
                   std::end(particleData[j]), [&](auto &&i) {
@@ -242,12 +248,9 @@ int main(int argc, char *argv[]) {
                     i.first = hilbert_c2i(3, 16, coord);
                   });
   }
-  double afterHilbert = getCurrentTime();
-  double hilbertTime = afterHilbert - beforeHilbert;
   std::cout << " - Done!" << std::endl;
 
   std::cout << "Sorting points along hilbert curve..." << std::endl;
-  double beforeSort = getCurrentTime();
   for (size_t j = 0; j < particleData.size(); ++j) {
 #ifdef _WIN32
     // not sure why this isn't working on windows currently.
@@ -257,8 +260,6 @@ int main(int argc, char *argv[]) {
               particleData[j].end());
 #endif
   }
-  double afterSort = getCurrentTime();
-  double sortTime = afterSort - beforeSort;
   std::cout << " - Done!" << std::endl;
 
   // here just transferring to a vector we can actually use.
@@ -267,7 +268,6 @@ int main(int argc, char *argv[]) {
   float minScalarValue = +1e20f;
   float maxScalarValue = -1e20f;
 
-  double beforeValueRange = getCurrentTime();
   particles.resize(particleData.size());
   for (size_t j = 0; j < particleData.size(); ++j) {
     particles[j].resize(particleData[j].size());
@@ -279,9 +279,7 @@ int main(int argc, char *argv[]) {
     particleData[j].clear();
     maxNumParticles = std::max(maxNumParticles, particles[j].size());
   }
-  double afterValueRange = getCurrentTime();
-  double valueRangeTime = afterValueRange - beforeValueRange;
-
+  
   // normalize attributes
   if (maxScalarValue > minScalarValue) {
     for (size_t j = 0; j < particles.size(); ++j) {
@@ -338,9 +336,6 @@ int main(int argc, char *argv[]) {
   auto imageTexture = gprtDeviceTextureCreate<float4>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
       fbSize.y, 1, false, nullptr);
-  // auto imageTexture = gprtDeviceTextureCreate<float4>(
-  //     context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
-  //     fbSize.y, 1, false, nullptr);
 
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x,
@@ -396,7 +391,6 @@ int main(int argc, char *argv[]) {
   raygenData.imageTexture = gprtTextureGetHandle(imageTexture);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
-  // raygenData.rbfRadius = rbfRadius;
 
   std::cout << "Particles per leaf " << particlesPerLeaf << std::endl;
   uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
@@ -883,15 +877,12 @@ int main(int argc, char *argv[]) {
       }
 
       // Now we can build the tree
-      double beforeAccelBuild = getCurrentTime();
       gprtAccelBuild(context, particleAccel,
                      GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
       size_t particleSize = gprtBufferGetSize(particleBuffer);
       size_t aabbSize = gprtBufferGetSize(aabbBuffer);
       size_t accelSize = gprtAccelGetSize(particleAccel);
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-      double afterAccelBuild = getCurrentTime();
-      accelBuildTime = afterAccelBuild - beforeAccelBuild;
 
       // Assign tree to raygen parameters
       constants.world = gprtAccelGetHandle(world);
@@ -899,7 +890,6 @@ int main(int argc, char *argv[]) {
       previousParticleFrame = particleFrame;
     }
 
-    double accelUpdateTime = 0.0;
     if (previousParticleRadius != constants.rbfRadius || radiusEdited || densityEdited ||
         forceRebuild) {
       
@@ -940,15 +930,9 @@ int main(int argc, char *argv[]) {
       }
 
       // Now we can refit the tree
-      double beforeAccelUpdate = getCurrentTime();
       gprtAccelUpdate(context, particleAccel);
       gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-      double afterAccelUpdate = getCurrentTime();
-      accelUpdateTime = afterAccelUpdate - beforeAccelUpdate;
-
-      // std::cout << "accel update time " << accelUpdateTime * 1000 <<
-      // std::endl;
-
+      
       // Assign tree to raygen parameters
       constants.world = gprtAccelGetHandle(world);
 

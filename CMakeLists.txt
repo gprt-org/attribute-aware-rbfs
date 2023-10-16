@@ -51,7 +51,6 @@ set(COMPILE_DEFINITIONS)
 
 set(SOURCES
   hostCode.cpp
-  IniFile.cpp
 )
 add_executable(viewer)
 target_sources(viewer PRIVATE ${SOURCES})
