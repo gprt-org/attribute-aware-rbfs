@@ -61,12 +61,6 @@ extern GPRTProgram deviceCodeRBF;
 // initial image resolution
 const int2 fbSize = {1024, 1024};
 
-// Initial camera parameters
-float3 lookFrom = {3.5f, 3.5f, 3.5f};
-float3 lookAt = {0.f, 0.f, 0.f};
-float3 lookUp = {0.f, -1.f, 0.f};
-float cosFovy = 0.66f;
-
 uint32_t particlesPerLeaf = 1;
 std::vector<std::vector<float4>> particles;
 size_t maxNumParticles;
@@ -105,7 +99,7 @@ void pretty_bytes(uint32_t bytes) {
 }
 
 int main(int argc, char *argv[]) {
-  argparse::ArgumentParser program("RT Point Clouds");
+  argparse::ArgumentParser program("Attribute-Aware Radial Basis Functions");
 
   program.add_argument("--particles")
       .help("A path to our custom particles dataset (ending in .particles)")
@@ -136,7 +130,6 @@ int main(int argc, char *argv[]) {
   }
 
   std::vector<std::vector<std::pair<uint64_t, float4>>> particleData;
-
   std::string particlesPath = program.get<std::string>("--particles");
   bool synthetic = false;
   if (particlesPath != "") {
@@ -173,6 +166,10 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
+  if (particlesPerLeafArg > 0) particlesPerLeaf = particlesPerLeafArg;
+  std::cout << "Particles per leaf " << particlesPerLeaf << std::endl;
+
   size_t totalParticles = 0;
   for (size_t j = 0; j < particleData.size(); ++j) {
     totalParticles += particleData[j].size();
@@ -181,58 +178,18 @@ int main(int argc, char *argv[]) {
   std::cout << "Avg Particles Per Step "
             << totalParticles / float(particleData.size()) << std::endl;
   std::cout << "Num steps " << particleData.size() << std::endl;
-  ;
 
-  float3 aabb[2] = {
-      {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
-       std::numeric_limits<float>::max()},
-      {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
-       -std::numeric_limits<float>::max()},
-  };
+  float3 aabb[2] = {{1e38f, 1e38f, 1e38f}, {-1e38f, -1e38f, -1e38f}};
 
-  std::vector<float3> aabbs;
 
-  std::cout << "Computing bounding box..." << std::endl;
+  std::cout << "Computing space-time bounding box..." << std::endl;
   for (size_t j = 0; j < particleData.size(); ++j) {
-    float3 thisAabb[2] = {
-        {std::numeric_limits<float>::max(), std::numeric_limits<float>::max(),
-         std::numeric_limits<float>::max()},
-        {-std::numeric_limits<float>::max(), -std::numeric_limits<float>::max(),
-         -std::numeric_limits<float>::max()},
-    };
-
     for (size_t i = 0; i < particleData[j].size(); ++i) {
       aabb[0] = linalg::min(aabb[0], particleData[j][i].second.xyz());
       aabb[1] = linalg::max(aabb[1], particleData[j][i].second.xyz());
-
-      thisAabb[0] = linalg::min(thisAabb[0], particleData[j][i].second.xyz());
-      thisAabb[1] = linalg::max(thisAabb[1], particleData[j][i].second.xyz());
     }
-
-    aabbs.push_back(thisAabb[0]);
-    aabbs.push_back(thisAabb[1]);
   }
   std::cout << " - Done!" << std::endl;
-
-  std::vector<float> camParams = program.get<std::vector<float>>("--camera");
-
-  if (camParams.size() > 0) {
-    lookFrom = float3(camParams[0], camParams[1], camParams[2]);
-    lookAt = float3(camParams[3], camParams[4], camParams[5]);
-    lookUp = float3(camParams[6], camParams[7], camParams[8]);
-    cosFovy = camParams[9];
-  } else {
-    // set focus to aabb
-    lookAt = (aabb[1] + aabb[0]) * .5f;
-    lookFrom = aabb[1];
-
-    if (synthetic) {
-      lookAt = {0.f, 0.f, 0.f};
-      lookFrom = {-3.f, 3.f, 3.f};
-    }
-  }
-
-  bool camChanged = camParams.empty();
 
   // Now, we compute hilbert codes per-point
   std::cout << "Computing hilbert codes..." << std::endl;
@@ -291,41 +248,68 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  // Initialize some camera parameters
+  float3 lookFrom, lookAt, lookUp;
+  float cosFovy;
+  std::vector<float> camParams = program.get<std::vector<float>>("--camera");
+  if (camParams.size() > 0) {
+    lookFrom = float3(camParams[0], camParams[1], camParams[2]);
+    lookAt = float3(camParams[3], camParams[4], camParams[5]);
+    lookUp = float3(camParams[6], camParams[7], camParams[8]);
+    cosFovy = camParams[9];
+  } else {
+    // set focus to aabb
+    lookUp = {0.f, -1.f, 0.f};
+    lookAt = (aabb[1] + aabb[0]) * .5f;
+    lookFrom = aabb[1];
+    if (synthetic) {
+      lookAt = {0.f, 0.f, 0.f};
+      lookFrom = {-3.f, 3.f, 3.f};
+    }
+    cosFovy = 0.66f;
+  }
+
+  /// Setup GPRT, RT kernels, etc
   gprtRequestWindow(fbSize.x, fbSize.y, "RT Point Clouds");
+
+  // We have two ray types, one for our attribute-aware radial basis functions, 
+  // and one for a reference particle splatter
   gprtRequestRayTypeCount(2);
 
-  int32_t GPU = 0;
+  int32_t GPU = 0; // for now, just pick the first available GPU
   GPRTContext context = gprtContextCreate(&GPU);
   GPRTModule moduleCommon = gprtModuleCreate(context, deviceCodeCommon);
   GPRTModule moduleBounds = gprtModuleCreate(context, deviceCodeBounds);
   GPRTModule moduleSplat = gprtModuleCreate(context, deviceCodeSplat);
   GPRTModule moduleRBF = gprtModuleCreate(context, deviceCodeRBF);
 
+  // A kernel for computing particle bounding boxes
   auto GenRBFBounds =
       gprtComputeCreate<UnusedRecord>(context, moduleBounds, "GenRBFBounds");
+  
+  // A kernel for compositing imgui and handling temporal antialiasing 
   auto CompositeGui =
       gprtComputeCreate<RayGenData>(context, moduleCommon, "CompositeGui");
 
-  auto particleType = gprtGeomTypeCreate<ParticleData>(context, GPRT_AABBS);
-  gprtGeomTypeSetIntersectionProg(particleType, 1, moduleSplat,
-                                  "ParticleSplatIntersection");
-  gprtGeomTypeSetAnyHitProg(particleType, 1, moduleSplat,
-                            "ParticleSplatAnyHit");
-
-  gprtGeomTypeSetIntersectionProg(particleType, 0, moduleRBF,
-                                  "ParticleRBFIntersection");
+  // Custom intersection and anyhit programs for our particles.
+  auto particleType = gprtGeomTypeCreate<UnusedRecord>(context, GPRT_AABBS);
+  gprtGeomTypeSetIntersectionProg(particleType, 0, moduleRBF, "ParticleRBFIntersection");
   gprtGeomTypeSetAnyHitProg(particleType, 0, moduleRBF, "ParticleRBFAnyHit");
+  gprtGeomTypeSetIntersectionProg(particleType, 1, moduleSplat,"ParticleSplatIntersection");
+  gprtGeomTypeSetAnyHitProg(particleType, 1, moduleSplat, "ParticleSplatAnyHit");
 
+  // Required (but currently unused) miss program
   GPRTMissOf<UnusedRecord> miss =
       gprtMissCreate<UnusedRecord>(context, moduleCommon, "miss");
+
+  // Ray generation programs
   GPRTRayGenOf<RayGenData> ParticleSplatRayGen =
       gprtRayGenCreate<RayGenData>(context, moduleSplat, "ParticleSplatRayGen");
 
   GPRTRayGenOf<RayGenData> ParticleRBFRayGen =
       gprtRayGenCreate<RayGenData>(context, moduleRBF, "ParticleRBFRayGen");
 
-  RayGenData raygenData = {};
-
+  // Some buffers to store intermediate images
   auto frameBuffer =
       gprtDeviceBufferCreate<uint32_t>(context, fbSize.x * fbSize.y);
   auto accumBuffer =
@@ -339,6 +323,7 @@ int main(int argc, char *argv[]) {
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R32G32B32A32_SFLOAT, fbSize.x,
       fbSize.y, 1, false, nullptr);
 
+  // Attachments for our imgui rasterizer
   auto guiColorAttachment = gprtDeviceTextureCreate<uint32_t>(
       context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_SRGB, fbSize.x,
       fbSize.y, 1, false, nullptr);
@@ -347,9 +332,7 @@ int main(int argc, char *argv[]) {
       1, false, nullptr);
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
-  raygenData.fbSize = fbSize;
-
-  // Spatio-Temporal Blue noise
+  // Spatio-Temporal Blue Noise mask
   std::string path = STBN_DIR "256x256_l128_s16.png";
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
@@ -357,7 +340,7 @@ int main(int argc, char *argv[]) {
     context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, 1, false, pixels
   );  
 
-  // Colormap for visualization
+  // Color map / radius map / density map for visualization
   auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
                                                    GPRT_FORMAT_R8G8B8A8_SRGB,
                                                    64, 1, 1, false, nullptr);
@@ -370,85 +353,57 @@ int main(int argc, char *argv[]) {
       context, GPRT_IMAGE_TYPE_1D, GPRT_FORMAT_R8G8B8A8_SRGB, 64, 1, 1, false,
       nullptr);
 
-  auto sampler =
-      gprtSamplerCreate(context, GPRT_FILTER_LINEAR, GPRT_FILTER_LINEAR,
-                        GPRT_FILTER_LINEAR, 1, GPRT_SAMPLER_ADDRESS_MODE_CLAMP);
 
-  PushConstants constants;
 
-  raygenData.frameBuffer = gprtBufferGetHandle(frameBuffer);
+  // Some constant data made available for raygens
+  RayGenData raygenData = {};
+  raygenData.fbSize = fbSize;
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
-  raygenData.taaBuffer = gprtBufferGetHandle(taaBuffer);
-  raygenData.taaPrevBuffer = gprtBufferGetHandle(taaPrevBuffer);
   raygenData.stbnTexture = gprtTextureGetHandle(stbnTexture);
-  raygenData.colormap = gprtTextureGetHandle(colormap);
-  raygenData.radiusmap = gprtTextureGetHandle(radiusmap);
-  raygenData.densitymap = gprtTextureGetHandle(densitymap);
-  raygenData.colormapSampler = gprtSamplerGetHandle(sampler);
-  raygenData.guiTexture = gprtTextureGetHandle(guiColorAttachment);
-  raygenData.imageTexture = gprtTextureGetHandle(imageTexture);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
+  gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
+  gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
 
-  std::cout << "Particles per leaf " << particlesPerLeaf << std::endl;
-  uint32_t particlesPerLeafArg = program.get<uint32_t>("--particles-per-leaf");
-  
-  if (particlesPerLeafArg > 0)
-    particlesPerLeaf = particlesPerLeafArg;
-
+  // GPU buffers to store particle positions, attributes, and bounds
   auto particleBuffer =
       gprtDeviceBufferCreate<float4>(context, maxNumParticles, nullptr);
   int numAABBs = ((maxNumParticles + particlesPerLeaf - 1) / particlesPerLeaf);
   auto aabbBuffer =
       gprtDeviceBufferCreate<float3>(context, 2 * numAABBs, nullptr);
-  auto particleGeom = gprtGeomCreate<ParticleData>(context, particleType);
+
+  // For this sample, we'll just have one particle geometry. 
+  // This associates the geometry data (AABB bounds) with shader kernels
+  auto particleGeom = gprtGeomCreate<UnusedRecord>(context, particleType);
   gprtAABBsSetPositions(particleGeom, aabbBuffer,
                         ((maxNumParticles + particlesPerLeaf - 1) /
                          particlesPerLeaf) /* just one aabb */);
 
-  ParticleData particleRecord{};
-
-  constants.particlesPerLeaf = particlesPerLeaf;
-  // constants.numAABBs = numAABBs;
-
-  // constants.aabbs = gprtBufferGetHandle(aabbBuffer);
-  constants.particles = gprtBufferGetHandle(particleBuffer);
-  particleRecord.colormap = gprtTextureGetHandle(colormap);
-  particleRecord.radiusmap = gprtTextureGetHandle(radiusmap);
-  particleRecord.colormapSampler = gprtSamplerGetHandle(sampler);
-
-  gprtGeomSetParameters(particleGeom, &particleRecord);
-  gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
-  gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
-
-  // Upload parameters
-  gprtBuildShaderBindingTable(context, GPRT_SBT_COMPUTE);
+  PushConstants rtConstants;
+  rtConstants.colormap = gprtTextureGetHandle(colormap);
+  rtConstants.radiusmap = gprtTextureGetHandle(radiusmap);
+  rtConstants.densitymap = gprtTextureGetHandle(densitymap);
+  rtConstants.particlesPerLeaf = particlesPerLeaf;
+  rtConstants.particles = gprtBufferGetHandle(particleBuffer);
   
-  // copy raygen params
-  gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
-  gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
+  TAAConstants taaConstants;
+  taaConstants.disableTAA = false;
+  taaConstants.fbSize = fbSize;
+  taaConstants.frameBuffer = gprtBufferGetHandle(frameBuffer);
+  taaConstants.guiTexture = gprtTextureGetHandle(guiColorAttachment);
+  taaConstants.imageTexture = gprtTextureGetHandle(imageTexture);
+  taaConstants.taaBuffer = gprtBufferGetHandle(taaBuffer);
+  taaConstants.taaPrevBuffer = gprtBufferGetHandle(taaPrevBuffer);
+
+  // Build the shader binding table associating records with kernels, 
+  // geometry IDs, ray types, etc. Also compiles the kernels into a 
+  // ray tracing pipeline
   gprtBuildShaderBindingTable(context);
-
-  std::string cmMarksStr, rmMarksStr, dmMarksStr;
-
-  auto getMarks = [](std::string markStr) {
-    std::vector<std::pair<float, float4>> marks;
-    if (markStr.empty())
-      return marks;
-    markStr = markStr.substr(1, markStr.size() - 2); // remove quotes
-    auto s = string_split(markStr, ';');
-    for (auto m : s) {
-      float p, x, y, z, w;
-      sscanf(m.c_str(), "%f:{%f,%f,%f,%f}", &p, &x, &y, &z, &w);
-      marks.push_back({p, {x, y, z, w}});
-    }
-    return marks;
-  };
-
-  auto cmMarks = getMarks(cmMarksStr);
-  auto rmMarks = getMarks(rmMarksStr);
-  auto dmMarks = getMarks(dmMarksStr);
+  
+  std::vector<std::pair<float, float4>> cmMarks;
+  std::vector<std::pair<float, float4>> rmMarks;
+  std::vector<std::pair<float, float4>> dmMarks;
 
   if (cmMarks.empty()) {
     cmMarks.push_back({0.f, {0.f, 0.f, 1.f, 1.f}});
@@ -495,8 +450,8 @@ int main(int argc, char *argv[]) {
   bool firstFrame = true;
   double xpos = 0.f, ypos = 0.f;
   double lastxpos, lastypos;
-  constants.accumID = 1;
-  constants.frameID = 1;
+  rtConstants.accumID = 1;
+  rtConstants.frameID = 1;
 
   GPRTAccel particleAccel = gprtAABBAccelCreate(context, 1, &particleGeom);
   GPRTAccel world = gprtInstanceAccelCreate(context, 1, &particleAccel);
@@ -507,18 +462,16 @@ int main(int argc, char *argv[]) {
   float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool playAnimation = true;
-  constants.disableBlueNoise = false;
-  constants.disableTAA = false;
+  rtConstants.disableBlueNoise = false;
   std::stringstream frameStats;
 
-  constants.rbfRadius = previousParticleRadius;
-  constants.clampMaxCumulativeValue = 1.f;
-  constants.unit = previousParticleRadius * .1f;
-  constants.visualizeAttributes = true;
-  constants.light.azimuth = 0.f;
-  constants.light.elevation = 0.f;
-  constants.light.ambient = .5f;
-  constants.frameID = 0;
+  rtConstants.rbfRadius = previousParticleRadius;
+  rtConstants.unit = previousParticleRadius * .1f;
+  rtConstants.visualizeAttributes = true;
+  rtConstants.light.azimuth = 0.f;
+  rtConstants.light.elevation = 0.f;
+  rtConstants.light.ambient = .5f;
+  rtConstants.frameID = 0;
 
   do {
     ImGuiIO &io = ImGui::GetIO();
@@ -533,20 +486,20 @@ int main(int argc, char *argv[]) {
       particleFrame++;
       if (particleFrame >= particles.size())
         particleFrame = 1;
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
 
       if (synthetic) {
-        constants.light.azimuth = sin(gprtGetTime(context)) * .5 + .5;
-        constants.light.elevation = cos(gprtGetTime(context));
-        constants.accumID = 1;
+        rtConstants.light.azimuth = sin(gprtGetTime(context)) * .5 + .5;
+        rtConstants.light.elevation = cos(gprtGetTime(context));
+        rtConstants.accumID = 1;
       }
     }
 
     // Radius and colormap controls
-    bool radiusEdited = ImGui::DragFloat("Particle Radius", &constants.rbfRadius, 
+    bool radiusEdited = ImGui::DragFloat("Particle Radius", &rtConstants.rbfRadius, 
                       0.0001f * diagonal, .0001f * diagonal, 1.f * diagonal, "%.5f");
-    if (constants.rbfRadius != previousParticleRadius && radiusArg > 0.f)
-      constants.rbfRadius = radiusArg;
+    if (rtConstants.rbfRadius != previousParticleRadius && radiusArg > 0.f)
+      rtConstants.rbfRadius = radiusArg;
     bool densityEdited = false;
           
     auto make_8bit = [](const float f) -> uint32_t {
@@ -565,7 +518,7 @@ int main(int argc, char *argv[]) {
         ptr[i * 4 + 3] = make_8bit(result.w);
       }
 
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
       gprtTextureUnmap(colormap);
     }
 
@@ -580,7 +533,7 @@ int main(int argc, char *argv[]) {
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
       gprtTextureUnmap(radiusmap);
     }
 
@@ -595,21 +548,21 @@ int main(int argc, char *argv[]) {
         ptr[i * 4 + 0] = make_8bit(result.x);
       }
 
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
       gprtTextureUnmap(densitymap);
     }
 
     // Blue noise controls
-    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&constants.disableBlueNoise))
-      constants.accumID = 1;
-    if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&constants.disableTAA))
-      constants.accumID = 1;
+    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&rtConstants.disableBlueNoise))
+      rtConstants.accumID = 1;
+    if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&taaConstants.disableTAA))
+      rtConstants.accumID = 1;
 
     static int mode = 1;
     if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
     if (ImGui::RadioButton("Splatting (Knoll 2019)", &mode, 0))
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
 
     float speed = .001f;
     lastxpos = xpos;
@@ -697,11 +650,11 @@ int main(int argc, char *argv[]) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      constants.camera.pos = camera_pos;
-      constants.camera.dir_00 = camera_d00;
-      constants.camera.dir_du = camera_ddu;
-      constants.camera.dir_dv = camera_ddv;
-      constants.accumID = 1;
+      rtConstants.camera.pos = camera_pos;
+      rtConstants.camera.dir_00 = camera_d00;
+      rtConstants.camera.dir_du = camera_ddu;
+      rtConstants.camera.dir_dv = camera_ddv;
+      rtConstants.accumID = 1;
     }
 
     if (rstate == GPRT_PRESS && !io.WantCaptureMouse) {
@@ -718,8 +671,8 @@ int main(int argc, char *argv[]) {
       }
 
       lookFrom = lookAt + view_vec;
-      constants.camera.pos = lookFrom;
-      constants.accumID = 1;
+      rtConstants.camera.pos = lookFrom;
+      rtConstants.accumID = 1;
     }
 
     if (mstate == GPRT_PRESS && !io.WantCaptureMouse) {
@@ -744,37 +697,33 @@ int main(int argc, char *argv[]) {
       camera_d00 -= 0.5f * camera_ddv;
 
       // ----------- set variables  ----------------------------
-      constants.camera.pos = camera_pos;
-      constants.camera.dir_00 = camera_d00;
-      constants.camera.dir_du = camera_ddu;
-      constants.camera.dir_dv = camera_ddv;
-      constants.accumID = 1;
+      rtConstants.camera.pos = camera_pos;
+      rtConstants.camera.dir_00 = camera_d00;
+      rtConstants.camera.dir_du = camera_ddu;
+      rtConstants.camera.dir_dv = camera_ddv;
+      rtConstants.accumID = 1;
     }
 
-    if (ImGui::DragFloat("clamp max cumulative value", &constants.clampMaxCumulativeValue,
-                         1.f, 0.f, 5000.f)) {
-      constants.accumID = 1;
-    }
-    if (ImGui::InputFloat("step size", &constants.unit, 0.0f, 0.0f, "%.4f"))
-      constants.accumID = 1;
+    if (ImGui::InputFloat("step size", &rtConstants.unit, 0.0f, 0.0f, "%.4f"))
+      rtConstants.accumID = 1;
     
-    if (ImGui::Checkbox("Visualize Attributes", (bool*)&constants.visualizeAttributes)) {
-      constants.accumID = 1;
+    if (ImGui::Checkbox("Visualize Attributes", (bool*)&rtConstants.visualizeAttributes)) {
+      rtConstants.accumID = 1;
     }
 
-    constants.unit = std::max(constants.unit, .0001f);
+    rtConstants.unit = std::max(rtConstants.unit, .0001f);
 
 
-    if (ImGui::SliderFloat("azimuth", &constants.light.azimuth, 0.f, 1.f))
-      constants.accumID = 1;
-    if (ImGui::SliderFloat("elevation", &constants.light.elevation, -1.f, 1.f))
-      constants.accumID = 1;
-    if (ImGui::SliderFloat("ambient", &constants.light.ambient, 0.f, 1.f))
-      constants.accumID = 1;
+    if (ImGui::SliderFloat("azimuth", &rtConstants.light.azimuth, 0.f, 1.f))
+      rtConstants.accumID = 1;
+    if (ImGui::SliderFloat("elevation", &rtConstants.light.elevation, -1.f, 1.f))
+      rtConstants.accumID = 1;
+    if (ImGui::SliderFloat("ambient", &rtConstants.light.ambient, 0.f, 1.f))
+      rtConstants.accumID = 1;
     ImGui::EndFrame();
 
     bool frameChanged = previousParticleFrame != particleFrame;
-    bool radiusChanged = previousParticleRadius != constants.rbfRadius || radiusEdited || densityEdited;
+    bool radiusChanged = previousParticleRadius != rtConstants.rbfRadius || radiusEdited || densityEdited;
     
     // Particle manipulation
     if ( frameChanged || radiusChanged) 
@@ -788,7 +737,7 @@ int main(int argc, char *argv[]) {
         gprtBufferUnmap(particleBuffer);
       }
 
-      constants.numParticles = particles[particleFrame].size();
+      rtConstants.numParticles = particles[particleFrame].size();
      
       // Generate bounding boxes for those particles
       // note, unneeded boxes will be inactivated.
@@ -797,8 +746,8 @@ int main(int argc, char *argv[]) {
       bc.numAABBs = numAABBs;
       bc.particles = gprtBufferGetHandle(particleBuffer);
       bc.numParticles = particles[particleFrame].size();
-      bc.particlesPerLeaf = constants.particlesPerLeaf;
-      bc.rbfRadius = constants.rbfRadius;
+      bc.particlesPerLeaf = rtConstants.particlesPerLeaf;
+      bc.rbfRadius = rtConstants.rbfRadius;
       bc.radiusmap = gprtTextureGetHandle(radiusmap);
       int numWorkGroups = (numAABBs + 1023) / 1024; // 1024 threads per workgroup
       gprtComputeLaunch1D(context, GenRBFBounds, numWorkGroups, bc);
@@ -807,7 +756,10 @@ int main(int argc, char *argv[]) {
       if (radiusChanged) {
         gprtAccelBuild(context, particleAccel, GPRT_BUILD_MODE_FAST_TRACE_AND_UPDATE);
         gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
-        constants.world = gprtAccelGetHandle(world);
+        rtConstants.world = gprtAccelGetHandle(world);
+
+        // account for newly introduced geometry to the SBT
+        gprtBuildShaderBindingTable(context, GPRT_SBT_GEOM);
       }
       // Refit the tree if particles didn't move
       else {
@@ -815,30 +767,24 @@ int main(int argc, char *argv[]) {
         gprtAccelBuild(context, world, GPRT_BUILD_MODE_FAST_TRACE_NO_UPDATE);
       }
 
-      constants.accumID = 1;
+      rtConstants.accumID = 1;
       previousParticleFrame = particleFrame;
-      previousParticleRadius = constants.rbfRadius;
+      previousParticleRadius = rtConstants.rbfRadius;
     }
 
     // Render the user interface
     gprtTextureClear(guiDepthAttachment);
     gprtTextureClear(guiColorAttachment);
     gprtGuiRasterize(context);
-
-    // copy raygen params
-    gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
-    gprtRayGenSetParameters(ParticleRBFRayGen, &raygenData);
-    gprtComputeSetParameters(CompositeGui, &raygenData);
-    gprtBuildShaderBindingTable(context, GPRT_SBT_ALL);
     
     gprtBeginProfile(context);
 
     switch (mode) {
     case 0:
-      gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y, constants);
+      gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y, rtConstants);
       break;
     case 1:
-      gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y, constants);
+      gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y, rtConstants);
       break;
     default:
       break;
@@ -847,12 +793,12 @@ int main(int argc, char *argv[]) {
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
 
-    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y, constants);
+    gprtComputeLaunch2D(context, CompositeGui, fbSize.x, fbSize.y, taaConstants);
 
     gprtBufferPresent(context, frameBuffer);
 
-    constants.accumID++;
-    constants.frameID++;
+    rtConstants.accumID++;
+    rtConstants.frameID++;
 
     gprtBufferCopy(context, taaBuffer, taaPrevBuffer, 0, 0,
                    fbSize.x * fbSize.y);

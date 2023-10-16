@@ -22,7 +22,7 @@
 
 #include "sharedCode.h"
 
-[[vk::push_constant]] PushConstants pc;
+[[vk::push_constant]] TAAConstants pc;
 
 float3 rgb2ycocg(in float3 rgb)
 {
@@ -64,14 +64,14 @@ float3 clipToAABB(in float3 cOld, in float3 cNew, in float3 centre, in float3 ha
     return cOld + dir * t;
 }
 
-GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
+GPRT_COMPUTE_PROGRAM(CompositeGui, (UnusedRecord, record), (1,1,1)) {
   int2 pixelID = DispatchThreadID.xy;
   float2 fragCoord = pixelID + float2(.5f, .5f);
-  float2 uv = (fragCoord) / float2(record.fbSize);
-  const int fbOfs = pixelID.x + record.fbSize.x * pixelID.y;
+  float2 uv = (fragCoord) / float2(pc.fbSize);
+  const int fbOfs = pixelID.x + pc.fbSize.x * pixelID.y;
   SamplerState sampler = gprt::getDefaultSampler();
 
-  Texture2D imageTexture = gprt::getTexture2DHandle(record.imageTexture);
+  Texture2D imageTexture = gprt::getTexture2DHandle(pc.imageTexture);
 
   // get the neighborhood min / max from this frame's render
   float4 center = imageTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
@@ -86,7 +86,7 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
         {          
           if (ix == 0 && iy == 0) continue;
 
-          float2 offsetUV = ((fragCoord + float2(ix, iy)) / record.fbSize.xy);
+          float2 offsetUV = ((fragCoord + float2(ix, iy)) / pc.fbSize.xy);
           float3 color = imageTexture.SampleGrad(sampler, offsetUV, float2(0.f, 0.f), float2(0.f, 0.f)).rgb;
           color = rgb2ycocg(color);
           minColor = min(minColor, color);
@@ -94,7 +94,7 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
         }
     }
 
-    float4 old = gprt::load<float4>(record.taaPrevBuffer, fbOfs);
+    float4 old = gprt::load<float4>(pc.taaPrevBuffer, fbOfs);
     
     // get last frame's pixel and clamp it to the neighborhood of this frame
     old.rgb = ycocg2rgb(max(rgb2ycocg(old.rgb), minColor));
@@ -102,16 +102,16 @@ GPRT_COMPUTE_PROGRAM(CompositeGui, (RayGenData, record), (1,1,1)) {
 
     float lerpAmount = .2f;
     pixelColor = lerp(old, center, lerpAmount);        
-    gprt::store(record.taaBuffer, fbOfs, pixelColor);
+    gprt::store(pc.taaBuffer, fbOfs, pixelColor);
   } else {
     pixelColor = center;
   }
 
   // Composite on top of everything else our user interface
-  Texture2D guiTexture = gprt::getTexture2DHandle(record.guiTexture);
+  Texture2D guiTexture = gprt::getTexture2DHandle(pc.guiTexture);
   float4 guiColor = guiTexture.SampleGrad(sampler, uv, float2(0.f, 0.f), float2(0.f, 0.f));
   pixelColor = over(guiColor, float4(pixelColor.r, pixelColor.g, pixelColor.b, pixelColor.a));
-  gprt::store(record.frameBuffer, fbOfs, gprt::make_bgra(pixelColor));
+  gprt::store(pc.frameBuffer, fbOfs, gprt::make_bgra(pixelColor));
 }
 
 struct [raypayload] NullPayload{

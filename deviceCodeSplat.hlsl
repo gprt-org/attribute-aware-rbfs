@@ -80,9 +80,9 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   float particlesPerSlab = PARTICLE_BUFFER_SIZE / 8; // just taking this for now
 
   RaytracingAccelerationStructure world = gprt::getAccelHandle(pc.world);
-  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-  Texture1D densitymap = gprt::getTexture1DHandle(record.densitymap);
-  SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
+  Texture1D colormap = gprt::getTexture1DHandle(pc.colormap);
+  Texture1D densitymap = gprt::getTexture1DHandle(pc.densitymap);
+  SamplerState colormapSampler = gprt::getDefaultSampler();
 
   // float4 result_color = float4(1.f, 1.f, 1.f, 0.f);
   float4 result_color = float4(0.f, 0.f, 0.f, 0.f);
@@ -118,7 +118,6 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
           float4 P = gprt::load<float4>(pc.particles, payload.particles[i].id);
           float3 X = rayDesc.Origin + rayDesc.Direction * payload.particles[i].t;
           float drbf = evaluate_rbf(X, P.xyz, pc.rbfRadius, 3.f);
-          if (pc.clampMaxCumulativeValue) drbf = min(drbf, pc.clampMaxCumulativeValue);
 
           float4 color;
           if (pc.visualizeAttributes) {
@@ -154,7 +153,7 @@ GPRT_RAYGEN_PROGRAM(ParticleSplatRayGen, (RayGenData, record)) {
   gprt::store(record.imageBuffer, fbOfs, result_color);
 }
 
-GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
+GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (UnusedRecord, record)) {
   uint clusterID = PrimitiveIndex();
   uint32_t particlesPerLeaf = pc.particlesPerLeaf;
   uint32_t numParticles = pc.numParticles;
@@ -187,7 +186,7 @@ GPRT_INTERSECTION_PROGRAM(ParticleSplatIntersection, (ParticleData, record)) {
   }
 }
 
-GPRT_ANY_HIT_PROGRAM(ParticleSplatAnyHit, (ParticleData, record), (SplatPayload, payload), (ParticleSample, hit_particle)) {
+GPRT_ANY_HIT_PROGRAM(ParticleSplatAnyHit, (UnusedRecord, record), (SplatPayload, payload), (ParticleSample, hit_particle)) {
   if (payload.tail < PARTICLE_BUFFER_SIZE) {
     payload.particles[payload.tail++] = hit_particle;
     gprt::ignoreHit();

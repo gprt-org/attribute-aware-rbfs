@@ -47,10 +47,6 @@ class ParticleTracker {
 
   bool dbg;
 
-  gprt::Texture cmap;
-  gprt::Texture dmap;
-  gprt::Sampler cmapSampler; 
-
   float3 lb;
   float3 rt;
 
@@ -68,12 +64,14 @@ class ParticleTracker {
     }
   }
   
-  void stochasticMarching(RayDesc ray) {    
-    RaytracingAccelerationStructure accel = gprt::getAccelHandle(pc.world);
-    SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
-    Texture1D colormap = gprt::getTexture1DHandle(cmap);
-    Texture1D densitymap = gprt::getTexture1DHandle(dmap);
+  void stochasticMarching(RayDesc ray) {   
 
+    RaytracingAccelerationStructure accel = gprt::getAccelHandle(pc.world);
+    SamplerState sampler = gprt::getDefaultSampler();
+    Texture1D colormap = gprt::getTexture1DHandle(pc.colormap);
+    Texture1D densitymap = gprt::getTexture1DHandle(pc.densitymap);
+
+    
     float RHS = -log(1.f - random * .99);
 
     // float 
@@ -115,8 +113,6 @@ class ParticleTracker {
       else {
         continue;
       }
-      
-      if (pc.clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, pc.clampMaxCumulativeValue) / pc.clampMaxCumulativeValue;
 
       float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
@@ -146,9 +142,9 @@ class ParticleTracker {
     float majorant = 1.f;
 
     RaytracingAccelerationStructure accel = gprt::getAccelHandle(pc.world);
-    SamplerState sampler = gprt::getSamplerHandle(cmapSampler);
-    Texture1D colormap = gprt::getTexture1DHandle(cmap);
-    Texture1D densitymap = gprt::getTexture1DHandle(dmap);
+    SamplerState sampler = gprt::getDefaultSampler();
+    Texture1D colormap = gprt::getTexture1DHandle(pc.colormap);
+    Texture1D densitymap = gprt::getTexture1DHandle(pc.densitymap);
 
     // float 
     t = ray.TMin;
@@ -191,8 +187,6 @@ class ParticleTracker {
       }
       else continue;
       
-      if (pc.clampMaxCumulativeValue > 0.f) payload.density = min(payload.density, pc.clampMaxCumulativeValue) / pc.clampMaxCumulativeValue;
-
       float density = densitymap.SampleGrad(sampler, payload.density, 0.f, 0.f).r;
       
       if (!pc.visualizeAttributes) {
@@ -238,8 +232,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
 
   // for now, assuming one global radius.  
   RaytracingAccelerationStructure world = gprt::getAccelHandle(pc.world);
-  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
-  SamplerState colormapSampler = gprt::getSamplerHandle(record.colormapSampler);
+  Texture1D colormap = gprt::getTexture1DHandle(pc.colormap);
 
   ParticleTracker tracker;
   
@@ -272,9 +265,6 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   tracker.random = random.x;  
   tracker.albedo = float4(0.f, 0.f, 0.f, 0.f);
   tracker.dbg = false;
-  tracker.cmap = record.colormap;
-  tracker.dmap = record.densitymap;
-  tracker.cmapSampler = record.colormapSampler;
   tracker.lb = lb;
   tracker.rt = rt;
   tracker.shadowRay = false;
@@ -341,13 +331,13 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   gprt::store(record.imageBuffer, fbOfs, finalColor);
 }
 
-GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
+GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (UnusedRecord, record)) {
   uint clusterID = PrimitiveIndex();
   uint32_t particlesPerLeaf = pc.particlesPerLeaf;
   uint32_t numParticles = pc.numParticles;
-  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-  Texture1D radiusmap = gprt::getTexture1DHandle(record.radiusmap);
-  
+  SamplerState sampler = gprt::getDefaultSampler();
+  Texture1D radiusmap = gprt::getTexture1DHandle(pc.radiusmap);
+
   for (uint32_t i = 0; i < particlesPerLeaf; ++i) {
     uint32_t primID = clusterID * particlesPerLeaf + i;
     if (primID >= numParticles) break;
@@ -365,10 +355,10 @@ GPRT_INTERSECTION_PROGRAM(ParticleRBFIntersection, (ParticleData, record)) {
   }
 }
 
-GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, payload), (RBFAttribute, hit_particle)) {
+GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (UnusedRecord, record), (RBFPayload, payload), (RBFAttribute, hit_particle)) {
   
-  SamplerState sampler = gprt::getSamplerHandle(record.colormapSampler);
-  Texture1D colormap = gprt::getTexture1DHandle(record.colormap);
+  SamplerState sampler = gprt::getDefaultSampler();
+  Texture1D colormap = gprt::getTexture1DHandle(pc.colormap);
   float4 color = colormap.SampleGrad(sampler, hit_particle.attribute, 0.f, 0.f);
 
   // transparent particle
@@ -381,9 +371,15 @@ GPRT_ANY_HIT_PROGRAM(ParticleRBFAnyHit, (ParticleData, record), (RBFPayload, pay
   payload.density += hit_particle.density * pow(color.w, 3);
   payload.color.rgb += pow(color.rgb, 2.2f) * hit_particle.density * pow(color.w, 3);
   
-  if (pc.clampMaxCumulativeValue > 0.f && !pc.visualizeAttributes) {
-    payload.density = min(payload.density, pc.clampMaxCumulativeValue); 
-    gprt::acceptHitAndEndSearch(); // early termination of RBF evaluation
+  // if we're not using density to drive a weighted average...
+  if (!pc.visualizeAttributes) {
+    payload.density = min(payload.density, 1.f); 
+
+    // early termination of density RBF evaluation
+    if (payload.density > 1.f) {
+      gprt::acceptHitAndEndSearch(); 
+      return;
+    }
   }
   gprt::ignoreHit(); // forces traversal to continue
 }

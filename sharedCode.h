@@ -34,6 +34,10 @@ struct PushConstants {
   uint16_t accumID;
   uint16_t frameID;
 
+  uint16_t disableBlueNoise;
+  uint16_t visualizeAttributes;
+  uint16_t particlesPerLeaf;
+
   // parameters for light controls
   struct {
     float azimuth;
@@ -52,22 +56,19 @@ struct PushConstants {
   // a global scale for the particles
   float rbfRadius;
 
-  // used for tree compression
-  uint16_t particlesPerLeaf;
-
-  // A switch to visualize either RBF density or per-particle attributes
-  uint16_t disableBlueNoise;
-  uint16_t disableTAA;
-  uint16_t visualizeAttributes;
-
-  // For controling the relative density of delta tracking
+  // For controling the relative density of delta tracking.
+  // Try to keep this at or above the rbf radius size.
   float unit;
-  float clampMaxCumulativeValue;
 
   // Acceleration structure containing our particles
   gprt::Accel world;
   gprt::Buffer particles;
   uint32_t numParticles;
+
+  // colormap for visualization
+  gprt::Texture colormap;
+  gprt::Texture radiusmap;
+  gprt::Texture densitymap;
 };
 
 // Struct avaiable selectively for particle bounds calculation
@@ -83,34 +84,34 @@ struct BoundsConstants {
   gprt::Texture radiusmap;
 };
 
-/* variables available to all programs */
+struct TAAConstants {
+  uint16_t disableTAA;
 
-struct ParticleData {
-  gprt::Texture colormap;
-  gprt::Texture radiusmap;
-  gprt::Sampler colormapSampler;
-};
+  int2 fbSize;  
 
-struct RayGenData {
-  gprt::Texture guiTexture;
+  // Raw output from ray generation program
   gprt::Texture imageTexture;
-  gprt::Texture stbnTexture;
 
+  // Raw Imgui image before compositing
+  gprt::Texture guiTexture;
+
+  // Final image after TAA and GUI compositing
   gprt::Buffer frameBuffer;
-  gprt::Buffer imageBuffer;
+
   gprt::Buffer taaBuffer;
   gprt::Buffer taaPrevBuffer;
+};
+
+/* variables available to all programs */
+struct RayGenData {
+  gprt::Texture stbnTexture;
+
+  gprt::Buffer imageBuffer;
   gprt::Buffer accumBuffer;
   int2 fbSize;  
 
   float3 globalAABBMin;
   float3 globalAABBMax;
-
-  // colormap for visualization
-  gprt::Texture colormap;
-  gprt::Texture radiusmap;
-  gprt::Texture densitymap;
-  gprt::Sampler colormapSampler;
 };
 
 /* Struct for unused records. */
