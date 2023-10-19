@@ -61,8 +61,8 @@ set(COMPILE_DEFINITIONS)
 set(SOURCES
   hostCode.cpp
 )
-add_executable(viewer)
-target_sources(viewer PRIVATE ${SOURCES})
+add_executable(aarfb)
+target_sources(aarfb PRIVATE ${SOURCES})
 
 set(COMPILE_DEFINITIONS ${COMPILE_DEFINITIONS} -DSTBN_DIR="${CMAKE_CURRENT_SOURCE_DIR}/")
 
@@ -73,5 +73,5 @@ else(${TBB_FOUND})
 message(WARN " Could NOT find TBB")
 endif()
 
-target_link_libraries(viewer PUBLIC ${LIBRARIES})
-target_compile_definitions(viewer PUBLIC ${COMPILE_DEFINITIONS})
+target_link_libraries(aarfb PUBLIC ${LIBRARIES})
+target_compile_definitions(aarfb PUBLIC ${COMPILE_DEFINITIONS})
