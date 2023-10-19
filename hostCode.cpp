@@ -333,12 +333,22 @@ int main(int argc, char *argv[]) {
   gprtGuiSetRasterAttachments(context, guiColorAttachment, guiDepthAttachment);
 
   // Spatio-Temporal Blue Noise mask
-  std::string path = STBN_DIR "256x256_l128_s16.png";
+  bool STBNFound = true;
+  std::string path = STBN_DIR "stbn.png";
+  std::string altpath = "./stbn.png";
   int texWidth, texHeight, texChannels;
   stbi_uc *pixels = stbi_load(path.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
-  GPRTTextureOf<stbi_uc> stbnTexture = gprtDeviceTextureCreate<stbi_uc>(
-    context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, 1, false, pixels
-  );  
+  if (!pixels) pixels = stbi_load(altpath.c_str(), &texWidth, &texHeight, &texChannels, STBI_rgb_alpha);
+  if (!pixels) STBNFound = false; 
+  
+  GPRTTextureOf<stbi_uc> stbnTexture;
+  if (STBNFound) {
+    stbnTexture = gprtDeviceTextureCreate<stbi_uc>(
+      context, GPRT_IMAGE_TYPE_2D, GPRT_FORMAT_R8G8B8A8_UNORM, texWidth, texHeight, 1, false, pixels
+    );
+  } else {
+    std::cout<<"WARNING: Could not find stbn.png in the current working directory! Force disabling blue noise..." << std::endl;
+  }
 
   // Color map / radius map / density map for visualization
   auto colormap = gprtDeviceTextureCreate<uint8_t>(context, GPRT_IMAGE_TYPE_1D,
@@ -360,7 +370,7 @@ int main(int argc, char *argv[]) {
   raygenData.fbSize = fbSize;
   raygenData.imageBuffer = gprtBufferGetHandle(imageBuffer);
   raygenData.accumBuffer = gprtBufferGetHandle(accumBuffer);
-  raygenData.stbnTexture = gprtTextureGetHandle(stbnTexture);
+  if (STBNFound) raygenData.stbnTexture = gprtTextureGetHandle(stbnTexture);
   raygenData.globalAABBMin = aabb[0];
   raygenData.globalAABBMax = aabb[1];
   gprtRayGenSetParameters(ParticleSplatRayGen, &raygenData);
@@ -462,7 +472,7 @@ int main(int argc, char *argv[]) {
   float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
   float radiusArg = program.get<float>("--radius");
   bool playAnimation = true;
-  rtConstants.disableBlueNoise = false;
+  rtConstants.disableBlueNoise = !STBNFound;
   std::stringstream frameStats;
 
   rtConstants.rbfRadius = previousParticleRadius;
@@ -553,8 +563,15 @@ int main(int argc, char *argv[]) {
     }
 
     // Blue noise controls
-    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&rtConstants.disableBlueNoise))
-      rtConstants.accumID = 1;
+    if (!STBNFound) {
+      ImGui::BeginDisabled();
+      ImGui::BeginTooltip();
+      ImGui::TextUnformatted("WARNING: Spatio Temporal Blue Noise  \"stbn.png\" texture \n not found in the current directory");
+      ImGui::EndTooltip();
+    }
+    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&rtConstants.disableBlueNoise)) rtConstants.accumID = 1;
+    if (!STBNFound) ImGui::EndDisabled();
+
     if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&taaConstants.disableTAA))
       rtConstants.accumID = 1;
 
