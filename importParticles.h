@@ -5,7 +5,7 @@
 
 // This function returns by reference a list of timesteps, where each timestep is a list of particles.
 // A particle is defined by a float4, where the "w" component acts as the scalar "attribute"
-std::vector<std::vector<float4>>& importParticles(std::string path)
+std::vector<std::vector<float4>> importParticles(std::string path)
 {
     std::vector<std::vector<float4>> particles;
     // This importer first looks at a header file which lists a series of timesteps
