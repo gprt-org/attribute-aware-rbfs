@@ -240,7 +240,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   // the "free flight distance sampling" process. (figuring out how deep
   // a photon travels from the camera into the volume)
   float3 random;
-  if (!pc.disableBlueNoise) {
+  if (pc.enableBlueNoise) {
     Texture2D stbn = gprt::getTexture2DHandle(record.stbnTexture);
     // 8 by 16 grid of 256x256 blue noise textures 
     uint2 gridCoord = int2(frameID % 8, (frameID / 8) % 16);    
@@ -302,7 +302,7 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
       tracker.dbg = false;
       tracker.LHS = 0;
       tracker.shadowRay = true;
-      if (pc.disableBlueNoise) {
+      if (!pc.enableBlueNoise) {
         tracker.t = 0.f;
       }
       else {
@@ -326,6 +326,10 @@ GPRT_RAYGEN_PROGRAM(ParticleRBFRayGen, (RayGenData, record)) {
   float4 prevColor = gprt::load<float4>(record.accumBuffer, fbOfs);
   float4 finalColor = (1.f / float(accumID)) * color + (float(accumID - 1) / float(accumID)) * prevColor;
   gprt::store<float4>(record.accumBuffer, fbOfs, finalColor);
+
+  if (pc.showNoise) {
+    finalColor = float4(random.x, random.x, random.x, 1.f);
+  }
 
   // just the rendered image
   gprt::store(record.imageBuffer, fbOfs, finalColor);

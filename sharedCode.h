@@ -34,7 +34,8 @@ struct PushConstants {
   uint16_t accumID;
   uint16_t frameID;
 
-  uint16_t disableBlueNoise;
+  uint16_t enableBlueNoise;
+  uint16_t showNoise;
   uint16_t visualizeAttributes;
   uint16_t particlesPerLeaf;
 
@@ -86,6 +87,7 @@ struct BoundsConstants {
 
 struct TAAConstants {
   uint16_t disableTAA;
+  uint16_t showNoise;
 
   int2 fbSize;  
 

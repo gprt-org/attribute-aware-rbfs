@@ -59,7 +59,8 @@ extern GPRTProgram deviceCodeSplat;
 extern GPRTProgram deviceCodeRBF;
 
 // initial image resolution
-const int2 fbSize = {1024, 1024};
+// const int2 fbSize = {1024, 1024};
+const int2 fbSize = {1920, 1080};
 
 uint32_t particlesPerLeaf = 1;
 std::vector<std::vector<float4>> particles;
@@ -157,9 +158,9 @@ int main(int argc, char *argv[]) {
             float t2 = (float(frame) / float(particleData.size()));
 
             particleData[frame][i].second =
-                float4((sin(t2 * 2.f * 3.14) + 1.0f) * ((x - 5.f) / 10.f),
-                       (sin(t2 * 2.f * 3.14) + 1.0f) * ((y - 5.f) / 10.f),
-                       (sin(t2 * 2.f * 3.14) + 1.0f) * ((z - 5.f) / 10.f), t1);
+                float4((sin(t2 * 2.f * 3.14) + 1.5f) * ((x - 5.f) / 10.f),
+                       (sin(t2 * 2.f * 3.14) + 1.5f) * ((y - 5.f) / 10.f),
+                       (sin(t2 * 2.f * 3.14) + 1.5f) * ((z - 5.f) / 10.f), t1);
           }
         }
       }
@@ -398,7 +399,8 @@ int main(int argc, char *argv[]) {
   rtConstants.particles = gprtBufferGetHandle(particleBuffer);
   
   TAAConstants taaConstants;
-  taaConstants.disableTAA = false;
+  taaConstants.disableTAA = true;
+  taaConstants.showNoise = false;
   taaConstants.fbSize = fbSize;
   taaConstants.frameBuffer = gprtBufferGetHandle(frameBuffer);
   taaConstants.guiTexture = gprtTextureGetHandle(guiColorAttachment);
@@ -471,8 +473,9 @@ int main(int argc, char *argv[]) {
   int previousParticleFrame = -1;
   float previousParticleRadius = ((synthetic) ? 0.05f : .01f) * diagonal;
   float radiusArg = program.get<float>("--radius");
-  bool playAnimation = true;
-  rtConstants.disableBlueNoise = !STBNFound;
+  bool playAnimation = false;
+  rtConstants.enableBlueNoise = false;
+  rtConstants.showNoise = false;
   std::stringstream frameStats;
 
   rtConstants.rbfRadius = previousParticleRadius;
@@ -487,9 +490,15 @@ int main(int argc, char *argv[]) {
     ImGuiIO &io = ImGui::GetIO();
     ImGui::NewFrame();
 
+    if (ImGui::Checkbox("Enable Spatio Temporal Blue Noise", (bool*)&rtConstants.enableBlueNoise)) rtConstants.accumID = 1;
+    if (ImGui::Checkbox("Show Noise", (bool*)&rtConstants.showNoise)) rtConstants.accumID = 1;
+
+    // forcing accumulation ID to 1
+    // rtConstants.accumID = 1;
+
     // Time controls
     static int particleFrame = 0;
-    ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
+    // ImGui::SliderInt("Frame", &particleFrame, 0, particles.size() - 1);
     if (ImGui::Button("Play Animation")) playAnimation = true;
     if (ImGui::Button("Pause Animation")) playAnimation = false;
     if (playAnimation) {
@@ -563,23 +572,23 @@ int main(int argc, char *argv[]) {
     }
 
     // Blue noise controls
-    if (!STBNFound) {
-      ImGui::BeginDisabled();
-      ImGui::BeginTooltip();
-      ImGui::TextUnformatted("WARNING: Spatio Temporal Blue Noise  \"stbn.png\" texture \n not found in the current directory");
-      ImGui::EndTooltip();
-    }
-    if (ImGui::Checkbox("Disable Blue Noise", (bool*)&rtConstants.disableBlueNoise)) rtConstants.accumID = 1;
-    if (!STBNFound) ImGui::EndDisabled();
+    // if (!STBNFound) {
+    //   ImGui::BeginDisabled();
+    //   ImGui::BeginTooltip();
+    //   ImGui::TextUnformatted("WARNING: Spatio Temporal Blue Noise  \"stbn.png\" texture \n not found in the current directory");
+    //   ImGui::EndTooltip();
+    // }
+    
+    // if (!STBNFound) ImGui::EndDisabled();
 
-    if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&taaConstants.disableTAA))
-      rtConstants.accumID = 1;
+    // if (ImGui::Checkbox("Disable Temporal Antialiasing", (bool*)&taaConstants.disableTAA))
+    //   rtConstants.accumID = 1;
 
-    static int mode = 1;
-    if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
-      rtConstants.accumID = 1;
-    if (ImGui::RadioButton("Splatting (Knoll 2019)", &mode, 0))
-      rtConstants.accumID = 1;
+    // static int mode = 1;
+    // if (ImGui::RadioButton("AA-RBF (Ours)", &mode, 1))
+    //   rtConstants.accumID = 1;
+    // if (ImGui::RadioButton("Splatting (Knoll 2019)", &mode, 0))
+    //   rtConstants.accumID = 1;
 
     float speed = .001f;
     lastxpos = xpos;
@@ -721,22 +730,22 @@ int main(int argc, char *argv[]) {
       rtConstants.accumID = 1;
     }
 
-    if (ImGui::InputFloat("step size", &rtConstants.unit, 0.0f, 0.0f, "%.4f"))
-      rtConstants.accumID = 1;
+    // if (ImGui::InputFloat("step size", &rtConstants.unit, 0.0f, 0.0f, "%.4f"))
+    //   rtConstants.accumID = 1;
     
-    if (ImGui::Checkbox("Visualize Attributes", (bool*)&rtConstants.visualizeAttributes)) {
-      rtConstants.accumID = 1;
-    }
+    // if (ImGui::Checkbox("Visualize Attributes", (bool*)&rtConstants.visualizeAttributes)) {
+    //   rtConstants.accumID = 1;
+    // }
 
     rtConstants.unit = std::max(rtConstants.unit, .0001f);
 
 
-    if (ImGui::SliderFloat("azimuth", &rtConstants.light.azimuth, 0.f, 1.f))
-      rtConstants.accumID = 1;
-    if (ImGui::SliderFloat("elevation", &rtConstants.light.elevation, -1.f, 1.f))
-      rtConstants.accumID = 1;
-    if (ImGui::SliderFloat("ambient", &rtConstants.light.ambient, 0.f, 1.f))
-      rtConstants.accumID = 1;
+    // if (ImGui::SliderFloat("azimuth", &rtConstants.light.azimuth, 0.f, 1.f))
+    //   rtConstants.accumID = 1;
+    // if (ImGui::SliderFloat("elevation", &rtConstants.light.elevation, -1.f, 1.f))
+    //   rtConstants.accumID = 1;
+    // if (ImGui::SliderFloat("ambient", &rtConstants.light.ambient, 0.f, 1.f))
+    //   rtConstants.accumID = 1;
     ImGui::EndFrame();
 
     bool frameChanged = previousParticleFrame != particleFrame;
@@ -796,16 +805,16 @@ int main(int argc, char *argv[]) {
     
     gprtBeginProfile(context);
 
-    switch (mode) {
-    case 0:
-      gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y, rtConstants);
-      break;
-    case 1:
+    // switch (mode) {
+    // case 0:
+    //   gprtRayGenLaunch2D(context, ParticleSplatRayGen, fbSize.x, fbSize.y, rtConstants);
+    //   break;
+    // case 1:
       gprtRayGenLaunch2D(context, ParticleRBFRayGen, fbSize.x, fbSize.y, rtConstants);
-      break;
-    default:
-      break;
-    }
+    //   break;
+    // default:
+    //   break;
+    // }
 
     gprtBufferTextureCopy(context, imageBuffer, imageTexture, 0, 0, 0, 0, 0, 0,
                           fbSize.x, fbSize.y, 1);
